@@ -22,11 +22,14 @@ chmod +x autogen.sh
 #CFLAGS="-O3 -march=native -Wall" ./configure --with-curl --with-crypto=$HOME/usr
 #CFLAGS="-O3 -march=native -Wall" ./configure --with-curl
 #CFLAGS="-O3 -march=core-avx2 -msha -Wall" ./configure --with-curl
-CFLAGS="-O3 -msse2 -Wall" ./configure --with-curl
+#CFLAGS="-O3 -msse2 -Wall" ./configure --with-curl
 #CFLAGS="-O3 -march=native -Wall" CXXFLAGS="$CFLAGS -std=gnu++11" ./configure --with-curl
 
-make -j 4
+#CFLAGS="-O3 -march=core-avx2 -msha -Wall" CXXFLAGS="$CFLAGS -std=gnu++11"  ./configure --with-curl
+#CFLAGS="-O3 -g  -march=znver2 -mtune=znver2 -mavx2 -flto -ffast-math -funroll-loops -ftree-vectorize -Wall"  ./configure --with-curl
+CC=gcc-13 CXX=g++-13 CFLAGS="-O3 -march=native -funroll-loops -ffast-math -ftree-vectorize" CXXFLAGS="-O3 -march=native" ./configure --with-curl
+make -j$(nproc) CC=gcc-13 CXX=g++-13
 
-strip -s cpuminer
+#strip -s cpuminer
 
 #mv cpuminer.exe release/cpuminer-avx2-sha.exe

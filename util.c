@@ -979,7 +979,7 @@ double target_to_diff(uint32_t* target)
 #define socket_blocks() (errno == EAGAIN || errno == EWOULDBLOCK)
 #endif
 
-static bool send_line(curl_socket_t sock, char *s)
+static bool send_line(struct stratum_ctx *sctx, char *s)
 {
 	size_t sent = 0;
 	int len;
@@ -993,15 +993,24 @@ static bool send_line(curl_socket_t sock, char *s)
 		fd_set wd;
 
 		FD_ZERO(&wd);
-		FD_SET(sock, &wd);
-		if (select((int) (sock + 1), NULL, &wd, NULL, &timeout) < 1)
+		FD_SET(sctx->sock, &wd);
+		if (select((int) (sctx->sock + 1), NULL, &wd, NULL, &timeout) < 1)
 			return false;
-		n = send(sock, s + sent, len, 0);
+#if LIBCURL_VERSION_NUM >= 0x071802
+		CURLcode rc = curl_easy_send(sctx->curl, s + sent, len, (size_t *)&n);
+		if (rc != CURLE_OK) {
+			if (rc != CURLE_AGAIN)
+				return false;
+			n = 0;
+		}
+#else
+		n = send(sctx->sock, s + sent, len, 0);
 		if (n < 0) {
 			if (!socket_blocks())
 				return false;
 			n = 0;
 		}
+#endif
 		sent += n;
 		len -= n;
 	}
@@ -1017,7 +1026,7 @@ bool stratum_send_line(struct stratum_ctx *sctx, char *s)
 		applog(LOG_DEBUG, "> %s", s);
 
 	pthread_mutex_lock(&sctx->sock_lock);
-	ret = send_line(sctx->sock, s);
+	ret = send_line(sctx, s);
 	pthread_mutex_unlock(&sctx->sock_lock);
 
 	return ret;
@@ -1077,6 +1086,20 @@ char *stratum_recv_line(struct stratum_ctx *sctx)
 			ssize_t n;
 
 			memset(s, 0, RBUFSIZE);
+#if LIBCURL_VERSION_NUM >= 0x071802
+			CURLcode rc = curl_easy_recv(sctx->curl, s, RECVSIZE, (size_t *)&n);
+			if (rc == CURLE_OK && !n) {
+				ret = false;
+				break;
+			}
+			if (rc != CURLE_OK) {
+				if (rc != CURLE_AGAIN || !socket_full(sctx->sock, 1)) {
+					ret = false;
+					break;
+				}
+			} else
+				stratum_buffer_append(sctx, s);
+#else
 			n = recv(sctx->sock, s, RECVSIZE, 0);
 			if (!n) {
 				ret = false;
@@ -1089,6 +1112,7 @@ char *stratum_recv_line(struct stratum_ctx *sctx)
 				}
 			} else
 				stratum_buffer_append(sctx, s);
+#endif
 		} while (time(NULL) - rstart < 60 && !strstr(sctx->sockbuf, "\n"));
 
 		if (!ret) {
@@ -1153,8 +1177,11 @@ bool stratum_connect(struct stratum_ctx *sctx, const char *url)
 		sctx->url = strdup(url);
 	}
 	free(sctx->curl_url);
-	sctx->curl_url = (char*) malloc(strlen(url));
-	sprintf(sctx->curl_url, "http%s", strstr(url, "://"));
+	sctx->curl_url = (char*) malloc(strlen(url) + 8);
+	/* Map stratum+ssl:// and stratum+tls:// to https://, everything else to http:// */
+	sprintf(sctx->curl_url, "%s%s",
+	        (strstr(url, "s://") || strstr(url, "ssl://")) ? "https" : "http",
+	        strstr(url, "://"));
 
 	if (opt_protocol)
 		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1);
@@ -1164,6 +1191,8 @@ bool stratum_connect(struct stratum_ctx *sctx, const char *url)
 	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, sctx->curl_err_str);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1);
 	curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
 	if (opt_proxy) {
 		curl_easy_setopt(curl, CURLOPT_PROXY, opt_proxy);
 		curl_easy_setopt(curl, CURLOPT_PROXYTYPE, opt_proxy_type);
@@ -1172,7 +1201,7 @@ bool stratum_connect(struct stratum_ctx *sctx, const char *url)
 #if LIBCURL_VERSION_NUM >= 0x070f06
 	curl_easy_setopt(curl, CURLOPT_SOCKOPTFUNCTION, sockopt_keepalive_cb);
 #endif
-#if LIBCURL_VERSION_NUM >= 0x071101
+#if LIBCURL_VERSION_NUM >= 0x071101 && LIBCURL_VERSION_NUM < 0x072d00
 	curl_easy_setopt(curl, CURLOPT_OPENSOCKETFUNCTION, opensocket_grab_cb);
 	curl_easy_setopt(curl, CURLOPT_OPENSOCKETDATA, &sctx->sock);
 #endif
@@ -1186,7 +1215,9 @@ bool stratum_connect(struct stratum_ctx *sctx, const char *url)
 		return false;
 	}
 
-#if LIBCURL_VERSION_NUM < 0x071101
+#if LIBCURL_VERSION_NUM >= 0x072d00
+	curl_easy_getinfo(curl, CURLINFO_ACTIVESOCKET, &sctx->sock);
+#elif LIBCURL_VERSION_NUM < 0x071101
 	/* CURLINFO_LASTSOCKET is broken on Win64; only use it as a last resort */
 	curl_easy_getinfo(curl, CURLINFO_LASTSOCKET, (long *)&sctx->sock);
 #endif

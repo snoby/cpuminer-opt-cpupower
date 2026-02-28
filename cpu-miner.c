@@ -1787,17 +1787,40 @@ static void *miner_thread( void *userdata )
 */
    if ( num_cpus > 1 )
    {
-      if ( (opt_affinity == -1LL) && (opt_n_threads) > 1 ) 
+      if ( (opt_affinity == -1LL) && (opt_n_threads) > 1 )
       {
-         if (opt_debug)
-            applog( LOG_DEBUG, "Binding thread %d to cpu %d (mask %x)",
-                   thr_id, thr_id % num_cpus, ( 1ULL << (thr_id % num_cpus) ) );
+         /* Pin thread N to the Nth CPU in the process affinity set.
+          * This respects numactl/taskset restrictions: if the process was
+          * launched bound to physical cores {0,1,...,15}, thread 0 gets
+          * CPU 0, thread 1 gets CPU 1, etc. — regardless of total num_cpus. */
+         cpu_set_t proc_set;
+         CPU_ZERO( &proc_set );
+         if ( sched_getaffinity( 0, sizeof(proc_set), &proc_set ) == 0 )
+         {
+            int allowed[CPU_SETSIZE];
+            int n_allowed = 0;
+            for ( int i = 0; i < CPU_SETSIZE; i++ )
+               if ( CPU_ISSET( i, &proc_set ) ) allowed[n_allowed++] = i;
+
+            int target_cpu = allowed[ thr_id % n_allowed ];
+            applog( LOG_DEBUG, "Thread %d pinned to CPU %d (%d allowed)",
+                               thr_id, target_cpu, n_allowed );
+            cpu_set_t thr_set;
+            CPU_ZERO( &thr_set );
+            CPU_SET( target_cpu, &thr_set );
+            pthread_setaffinity_np( thr_info[thr_id].pth,
+                                    sizeof(thr_set), &thr_set );
+         }
+         else
+         {
+            /* Fallback: original behaviour */
 #if ( __GNUC__ > 4 ) || ( ( __GNUC__ == 4 ) && ( __GNUC_MINOR__ >= 8 ) )
-         affine_to_cpu_mask( thr_id,
-                             (unsigned __int128)1LL << (thr_id % num_cpus) );
+            affine_to_cpu_mask( thr_id,
+                                (unsigned __int128)1LL << (thr_id % num_cpus) );
 #else
-         affine_to_cpu_mask( thr_id, 1ULL << (thr_id % num_cpus) );
+            affine_to_cpu_mask( thr_id, 1ULL << (thr_id % num_cpus) );
 #endif
+         }
       }
       else if (opt_affinity != -1)
       {
@@ -2715,7 +2738,9 @@ void parse_arg(int key, char *arg )
 		if (ap != arg) {
 			if (strncasecmp(arg, "http://", 7) &&
 			    strncasecmp(arg, "https://", 8) &&
-			    strncasecmp(arg, "stratum+tcp://", 14)) {
+			    strncasecmp(arg, "stratum+tcp://", 14) &&
+			    strncasecmp(arg, "stratum+ssl://", 14) &&
+			    strncasecmp(arg, "stratum+tls://", 14)) {
 				fprintf(stderr, "unknown protocol -- '%s'\n", arg);
 				show_usage_and_exit(1);
 			}

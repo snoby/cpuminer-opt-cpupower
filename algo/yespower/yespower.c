@@ -32,43 +32,47 @@
 
 int verstring;
 
+/* Callback hooks — left as NULL; wired externally if needed */
+void (*yespower_midway_callback)(void) = NULL;
+void (*yespower_finish_callback)(void) = NULL;
+
 void yespower_hash( const char *input, char *output, uint32_t len )
 {
    if (verstring==1)
-   { 
+   {
 		static const yespower_params_t v1 = {YESPOWER_0_9, 2048, 32, NULL, 0};
-		yespower_tls( (yespower_binary_t*)input, len, &v1, (yespower_binary_t*)output ); 
+		yespower_tls( (yespower_binary_t*)input, len, &v1, (yespower_binary_t*)output );
 	}
    if (verstring==2)
    {
 				static const yespower_params_t v2 = {YESPOWER_0_9, 4096, 16, NULL, 0};
-				yespower_tls( (yespower_binary_t*)input, len, &v2, (yespower_binary_t*)output ); 
+				yespower_tls( (yespower_binary_t*)input, len, &v2, (yespower_binary_t*)output );
 	}
    if (verstring==3)
    {
 				static const yespower_params_t v3 = {YESPOWER_0_9, 2048, 32, "CPUpower: The number of CPU working or available for proof-of-work mining", 73};
-				yespower_tls( (yespower_binary_t*)input, len, &v3, (yespower_binary_t*)output ); 
+				yespower_tls( (yespower_binary_t*)input, len, &v3, (yespower_binary_t*)output );
 	}
    if (verstring==4)
    {
 				static const yespower_params_t v4 = {YESPOWER_0_9, 2048, 32, (const uint8_t *)"UraniumX", 8};
-				yespower_tls( (yespower_binary_t*)input, len, &v4, (yespower_binary_t*)output ); 
+				yespower_tls( (yespower_binary_t*)input, len, &v4, (yespower_binary_t*)output );
 	}
    if (verstring==5)
    {
 				static const yespower_params_t v5 = {YESPOWER_0_9, 2048, 32, "LITBpower: The number of LITB working or available for proof-of-work mining", 73};
-				yespower_tls( (yespower_binary_t*)input, len, &v5, (yespower_binary_t*)output ); 
-	}	
+				yespower_tls( (yespower_binary_t*)input, len, &v5, (yespower_binary_t*)output );
+	}
    if (verstring==6)
    {
 				static const yespower_params_t v6 = {YESPOWER_0_9, 2048, 32, "InterITC", 8};
-				yespower_tls( (yespower_binary_t*)input, len, &v6, (yespower_binary_t*)output ); 
-	}	
+				yespower_tls( (yespower_binary_t*)input, len, &v6, (yespower_binary_t*)output );
+	}
    if (verstring==7)
    {
 				static const yespower_params_t v7 = {YESPOWER_0_9, 2048, 32, "Satoshi Nakamoto 31/Oct/2008 Proof-of-work is essentially one-CPU-one-vote", 74};
-				yespower_tls( (yespower_binary_t*)input, len, &v7, (yespower_binary_t*)output ); 
-	}		
+				yespower_tls( (yespower_binary_t*)input, len, &v7, (yespower_binary_t*)output );
+	}
 }
 
 int scanhash_yespower( int thr_id, struct work *work, uint32_t max_nonce,

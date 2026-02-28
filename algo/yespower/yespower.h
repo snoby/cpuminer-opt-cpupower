@@ -119,4 +119,8 @@ extern int yespower(yespower_local_t *local,
 extern int yespower_tls(const uint8_t *src, size_t srclen,
     const yespower_params_t *params, yespower_binary_t *dst);
 
+/* Callback functions for cache optimization */
+extern void (*yespower_midway_callback)(void);
+extern void (*yespower_finish_callback)(void);
+
 #endif /* !_YESPOWER_H_ */
