@@ -17,9 +17,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifdef MAP_ANON
 #include <sys/mman.h>
-#endif
+#include <errno.h>
+#include <syslog.h>
+#include <stdio.h>
+extern void applog(int prio, const char *fmt, ...);
 
 #define HUGEPAGE_THRESHOLD		(2 * 1024 * 1024)
 
@@ -54,12 +56,18 @@ static void *alloc_region(yespower_region_t *region, size_t size)
 	base = mmap(NULL, new_size, PROT_READ | PROT_WRITE, flags, -1, 0);
 	if (base != MAP_FAILED) {
 		base_size = new_size;
+		if (flags & MAP_HUGETLB)
+			applog(LOG_INFO, "yespower: MAP_HUGETLB OK — %zu MB with 2MB pages",
+			       new_size / (1024*1024));
 	} else if (flags & MAP_HUGETLB) {
+		applog(LOG_WARNING, "yespower: MAP_HUGETLB FAILED (errno=%d: %s) — falling back to 4KB pages",
+		       errno, strerror(errno));
 		flags &= ~MAP_HUGETLB;
 		base = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
 	}
 
 #else
+	applog(LOG_WARNING, "yespower: MAP_HUGETLB not available at compile time — using 4KB pages");
 	base = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
 #endif
 	if (base == MAP_FAILED)

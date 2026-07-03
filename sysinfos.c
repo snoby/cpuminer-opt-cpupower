@@ -56,11 +56,14 @@ static float linux_cputemp(int core)
 	return tc;
 }
 
-#define CPUFREQ_PATH \
- "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq"
+#define CPUFREQ_PATH0 \
+ "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
+#define CPUFREQ_PATHn \
+ "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq"
+
 static uint32_t linux_cpufreq(int core)
 {
-	FILE *fd = fopen(CPUFREQ_PATH, "r");
+	FILE *fd = fopen(CPUFREQ_PATH0, "r");
 	uint32_t freq = 0;
 
 	if (!fd)
@@ -70,6 +73,25 @@ static uint32_t linux_cpufreq(int core)
 		return freq;
 
 	return freq;
+}
+
+void linux_cpu_hilo_freq(float *lo, float *hi)
+{
+	long int freq = 0, hi_freq = 0, lo_freq = 0x7fffffff;
+
+	for (int i = 0; i < num_cpus; i++) {
+		char path[64];
+		sprintf(path, CPUFREQ_PATHn, i);
+		FILE *fd = fopen(path, "r");
+		if (!fd) return;
+		else if (fscanf(fd, "%ld", &freq)) {
+			if (freq > hi_freq) hi_freq = freq;
+			if (freq < lo_freq) lo_freq = freq;
+		}
+		fclose(fd);
+	}
+	*hi = (float)hi_freq;
+	*lo = (float)lo_freq;
 }
 
 #else /* WIN32 */

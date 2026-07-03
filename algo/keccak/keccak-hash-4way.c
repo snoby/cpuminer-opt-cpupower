@@ -432,7 +432,7 @@ static void keccak64_close( keccak64_ctx_m256i *kc, void *dst, size_t byte_len,
 {
     unsigned eb;
     union {
-       __m256i tmp[lim + 1];
+       __m256i tmp[137];  /* max lim (136) + 1, callers use lim=136 or 72 */
        sph_u64 dummy;   /* for alignment */
     } u;
     size_t j;

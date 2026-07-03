@@ -1,35 +1,68 @@
 #!/bin/bash
+# Two-phase PGO build: instrument -> profile via 60s benchmark -> rebuild.
+# ./build.sh          full PGO build (~4 min) when toolchain supports it
+# ./build.sh --quick  single-phase build, reuses existing profile if present
+#
+# Falls back automatically: no clang -> gcc; no llvm-profdata -> plain build.
+# Binary is -march=native: always rebuild on the machine that will mine.
+set -e
 
-#if [ "$OS" = "Windows_NT" ]; then
-#    ./mingw64.sh
-#    exit 0
-#fi
+BASE_CFLAGS="-O3 -march=native -pthread -funroll-loops -ffast-math -fomit-frame-pointer -falign-functions=32 -falign-loops=32 -fvectorize -fslp-vectorize"
+PGO_DIR="$(pwd)/pgo-profile"
+PROFDATA="$PGO_DIR/merged.profdata"
 
-# Linux build
+# Pick compiler: prefer clang (measured faster for yespower), else newest gcc
+if command -v clang >/dev/null; then
+    export CC=clang CXX=clang++
+else
+    for g in gcc-14 gcc-13 gcc-12 gcc; do
+        if command -v "$g" >/dev/null; then
+            export CC="$g" CXX="${g/gcc/g++}"
+            break
+        fi
+    done
+    # gcc doesn't know clang's vectorize flags
+    BASE_CFLAGS="-O3 -march=native -pthread -funroll-loops -ffast-math -fomit-frame-pointer -ftree-vectorize"
+fi
+echo "=== Compiler: $CC ($($CC --version | head -1)) ==="
 
-make distclean || echo clean
+LLVM_PROFDATA="$(command -v llvm-profdata-20 || command -v llvm-profdata || true)"
 
-rm -f config.status
-chmod +x autogen.sh
-./autogen.sh || echo done
+build() {
+    local extra="$1"
+    # -flto breaks the -fprofile-generate link (gold plugin); only use it
+    # on non-instrumented clang builds. Skip LTO for gcc (type-mismatch warnings).
+    local lto=""
+    [[ "$CC" == clang && "$extra" != *profile-generate* ]] && lto="-flto"
+    export CFLAGS="$BASE_CFLAGS $lto $extra"
+    export LDFLAGS="-pthread $lto $extra"
+    ./configure --with-curl
+    make clean
+    make -j"$(nproc)"
+}
 
-# Ubuntu 10.04 (gcc 4.4)
-# extracflags="-O3 -march=native -Wall -D_REENTRANT -funroll-loops -fvariable-expansion-in-unroller -fmerge-all-constants -fbranch-target-load-optimize2 -fsched2-use-superblocks -falign-loops=16 -falign-functions=16 -falign-jumps=16 -falign-labels=16"
+# PGO only wired up for clang + llvm-profdata; otherwise plain build
+if [[ "$CC" != clang || -z "$LLVM_PROFDATA" || "${1:-}" == "--quick" ]]; then
+    if [[ "$CC" == clang && -f "$PROFDATA" && "${1:-}" == "--quick" ]]; then
+        echo "=== Quick build reusing $PROFDATA ==="
+        build "-fprofile-use=$PROFDATA"
+    else
+        [[ "$CC" == clang && -z "$LLVM_PROFDATA" ]] && echo "=== llvm-profdata not found: building without PGO ==="
+        build ""
+    fi
+    echo "=== Build complete (no new profile) ==="
+    exit 0
+fi
 
-# Debian 7.7 / Ubuntu 14.04 (gcc 4.7+)
-#extracflags="$extracflags -Ofast -flto -fuse-linker-plugin -ftree-loop-if-convert-stores"
+# Phase 1: instrumented build + profile collection
+mkdir -p "$PGO_DIR"
+rm -f "$PGO_DIR"/*.profraw "$PROFDATA"
+build "-fprofile-generate=$PGO_DIR"
+echo "=== Collecting profile (60s benchmark) ==="
+timeout --signal=INT 60 ./cpuminer -a yespower --benchmark \
+    -t "$(nproc --all | awk '{print int($1/2)}')" || true
+"$LLVM_PROFDATA" merge -output="$PROFDATA" "$PGO_DIR"/*.profraw
 
-#CFLAGS="-O3 -march=native -Wall" ./configure --with-curl --with-crypto=$HOME/usr
-#CFLAGS="-O3 -march=native -Wall" ./configure --with-curl
-#CFLAGS="-O3 -march=core-avx2 -msha -Wall" ./configure --with-curl
-#CFLAGS="-O3 -msse2 -Wall" ./configure --with-curl
-#CFLAGS="-O3 -march=native -Wall" CXXFLAGS="$CFLAGS -std=gnu++11" ./configure --with-curl
-
-#CFLAGS="-O3 -march=core-avx2 -msha -Wall" CXXFLAGS="$CFLAGS -std=gnu++11"  ./configure --with-curl
-#CFLAGS="-O3 -g  -march=znver2 -mtune=znver2 -mavx2 -flto -ffast-math -funroll-loops -ftree-vectorize -Wall"  ./configure --with-curl
-CC=gcc-13 CXX=g++-13 CFLAGS="-O3 -march=native -funroll-loops -ffast-math -ftree-vectorize" CXXFLAGS="-O3 -march=native" ./configure --with-curl
-make -j$(nproc) CC=gcc-13 CXX=g++-13
-
-#strip -s cpuminer
-
-#mv cpuminer.exe release/cpuminer-avx2-sha.exe
+# Phase 2: optimized build using the profile
+build "-fprofile-use=$PROFDATA"
+echo "=== PGO build complete ==="

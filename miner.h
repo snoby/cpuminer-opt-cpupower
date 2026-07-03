@@ -56,11 +56,13 @@
 /*
 #ifndef min
 #define min(a,b) (a>b ? (b) :(a))
-#endif
-#ifndef max 
+
 #define max(a,b) (a<b ? (b) : (a))
+
 #endif
 */
+
+#define EXP32 4294967296.
 
 //#ifdef HAVE_ALLOCA_H
 //# include <alloca.h>
@@ -83,6 +85,8 @@ void *alloca (size_t);
 #ifdef HAVE_SYSLOG_H
 #include <syslog.h>
 #define LOG_BLUE 0x10 /* unique value */
+#define LOG_PINK 0x14 /* unique value */
+#define LOG_MINR 0x12 /* unique value */
 #else
 enum {
 	LOG_ERR,
@@ -92,8 +96,14 @@ enum {
 	LOG_DEBUG,
 	/* custom notices */
 	LOG_BLUE = 0x10,
+	LOG_PINK = 0x14,
+	LOG_MINR = 0x12,
 };
 #endif
+
+/* Safe division macro */
+#define safe_div( dividend, divisor, safe_result ) \
+	( (divisor) == 0 ? safe_result : ( (dividend) / (divisor) ) )
 
 static inline bool is_windows(void)
 {
@@ -282,6 +292,7 @@ struct thr_api {
 #define CL_YLW  "\x1B[33m"
 #define CL_BLU  "\x1B[34m"
 #define CL_MAG  "\x1B[35m"
+#define CL_PNK  "\x1B[35m"
 #define CL_CYN  "\x1B[36m"
 
 #define CL_BLK  "\x1B[22;30m" /* black */
@@ -345,6 +356,7 @@ void   cpu_getmodelid(char *outbuf, size_t maxsz);
 void   cpu_brand_string( char* s );
 
 float cpu_temp( int core );
+void  linux_cpu_hilo_freq( float *lo, float *hi );
 
 struct work {
 	uint32_t data[48];
@@ -505,8 +517,6 @@ enum algos {
         ALGO_DMD_GR,
         ALGO_DROP,        
         ALGO_FRESH,       
-        ALGO_GROESTL,     
-        ALGO_HEAVY,
         ALGO_HMQ1725,
         ALGO_HODL,
         ALGO_JHA,
@@ -595,8 +605,6 @@ static const char* const algo_names[] = {
         "dmd-gr",
         "drop",
         "fresh",
-        "groestl",
-        "heavy",
         "hmq1725",
         "hodl",
         "jha",
@@ -743,8 +751,6 @@ Options:\n\
                           dmd-gr        Diamond\n\
                           drop          Dropcoin\n\
                           fresh         Fresh\n\
-                          groestl       Groestl coin\n\
-                          heavy         Heavy\n\
                           hmq1725       Espers\n\
                           hodl          Hodlcoin\n\
                           jha           jackppot (Jackpotcoin)\n\
@@ -765,7 +771,6 @@ Options:\n\
                           phi1612       phi, LUX coin\n\
                           pluck         Pluck:128 (Supcoin)\n\
                           polytimos\n\
-                          quark         Quark\n\
                           qubit         Qubit\n\
                           scrypt        scrypt(1024, 1, 1) (default)\n\
                           scrypt:N      scrypt(N, 1, 1)\n\
@@ -844,6 +849,8 @@ Options:\n\
   -B, --background      run the miner in the background\n\
       --benchmark       run in offline benchmark mode\n\
       --cputest         debug hashes from cpu algorithms\n\
+      --cache-fit[=MB]  auto threads & affinity: fit per-thread working set (default\n\
+                        8 MB, all yespower variants) in each L3/CCX; NUMA-aware. Linux.\n\
       --cpu-affinity    set process affinity to cpu core(s), mask 0x3 for cores 0 and 1\n\
       --cpu-priority    set process priority (default: 0 idle, 2 normal to 5 highest)\n\
   -b, --api-bind        IP/Port for the miner API (default: 127.0.0.1:4048)\n\
@@ -879,6 +886,7 @@ static struct option const options[] = {
         { "coinbase-addr", 1, NULL, 1016 },
         { "coinbase-sig", 1, NULL, 1015 },
         { "config", 1, NULL, 'c' },
+        { "cache-fit", 2, NULL, 1027 },
         { "cpu-affinity", 1, NULL, 1020 },
         { "cpu-priority", 1, NULL, 1021 },
         { "no-color", 0, NULL, 1002 },

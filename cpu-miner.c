@@ -2,8 +2,8 @@
  * Copyright 2010 Jeff Garzik
  * Copyright 2012-2014 pooler
  * Copyright 2014 Lucas Jones
- * Copyright 2014 Tanguy Pruvot
- * Copyright 2016 Jay D Dee
+ * Copyright 2014-2016 Tanguy Pruvot
+ * Copyright 2016-2023 Jay D Dee
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -34,11 +34,14 @@
 #include <time.h>
 #include <signal.h>
 #include <memory.h>
+#include <float.h>
 
 #include <curl/curl.h>
 #include <jansson.h>
 #include <openssl/sha.h>
+#include <syslog.h>
 
+#include "miner.h"
 
 #ifdef _MSC_VER
 #include <windows.h>
@@ -58,7 +61,6 @@
 #include <sys/resource.h>
 #endif
 
-#include "miner.h"
 #include "algo-gate-api.h"
 
 #ifdef WIN32
@@ -103,6 +105,7 @@ enum algos opt_algo = ALGO_NULL;
 int opt_scrypt_n = 0;
 int opt_pluck_n = 128;
 int opt_n_threads = 0;
+int opt_cache_fit = 0;   /* --cache-fit working-set MB per thread; 0 = off */
 #if ( __GNUC__ > 4 ) || ( ( __GNUC__ == 4 ) && ( __GNUC_MINOR__ >= 8 ) )
 __int128_t opt_affinity = -1LL;
 #else
@@ -160,11 +163,222 @@ uint64_t net_blocks = 0;
   int opt_api_remote = 0;
   int opt_api_listen = 4048; 
 
-  pthread_mutex_t rpc2_job_lock;
-  pthread_mutex_t rpc2_login_lock;
-  pthread_mutex_t applog_lock;
-  pthread_mutex_t stats_lock;
+   pthread_mutex_t rpc2_job_lock;
+   pthread_mutex_t rpc2_login_lock;
+   pthread_mutex_t applog_lock;
+   pthread_mutex_t stats_lock;
 
+// Enhanced periodic reporting tracking variables
+static struct timeval session_start = {0};
+static struct timeval five_min_start = {0};
+static struct timeval total_hashes_time = {0};
+static double total_hashes_time_double = 0.0;
+static uint64_t total_hashes = 0;
+static uint64_t submit_sum = 0;
+static uint64_t accept_sum = 0;
+static uint64_t reject_sum = 0;
+static uint64_t stale_sum = 0;
+static uint64_t solved_sum = 0;
+static double norm_diff_sum = 0.0;
+static double highest_share = 0.0;
+static double lowest_share = DBL_MAX;
+static uint32_t stratum_errors = 0;
+static uint32_t prev_temp = 0;
+static uint32_t hi_temp = 0;
+static double last_targetdiff = 0.0;
+// Share counters (global, not just periodic)
+static uint64_t submitted_share_count = 0;
+static uint64_t accepted_share_count = 0;
+static uint64_t rejected_share_count = 0;
+static uint64_t stale_share_count = 0;
+static uint64_t solved_block_count = 0;
+
+// Helper function: Convert seconds to human-readable format
+static inline void sprintf_et(char *str, long unsigned int seconds)
+{
+	long unsigned int minutes = seconds / 60;
+	if (minutes) {
+		long unsigned int hours = minutes / 60;
+		if (hours) {
+			long unsigned int days = hours / 24;
+			if (days) {
+				long unsigned int years = days / 365;
+				if (years)
+					sprintf(str, "%luy%03lud", years, days % 365);
+				else
+					sprintf(str, "%lud%02luh", days, hours % 24);
+			} else
+				sprintf(str, "%luh%02lum", hours, minutes % 60);
+		} else
+			sprintf(str, "%lum%02lus", minutes, seconds % 60);
+	} else
+		sprintf(str, "%lus", seconds);
+}
+
+// Enhanced periodic reporting function
+static void report_summary_log( bool force )
+{
+	struct timeval now, et, uptime, start_time;
+	static struct timeval cpu_temp_time = {0};
+	
+#if !(defined(__WINDOWS__) || defined(_WIN64) || defined(_WIN32) || defined(__APPLE__))
+	int curr_temp = cpu_temp(0);
+	struct timeval diff;
+#endif
+	
+	// Check for excessive rejections
+	if ( rejected_share_count > 10 ) {
+		if ( rejected_share_count > ( submitted_share_count / 2 ) ) {
+			applog(LOG_ERR, "Excessive rejected share rate, exiting...");
+			exit(1);
+		} else if ( rejected_share_count > ( submitted_share_count / 10 ) )
+			applog(LOG_WARNING, "High rejected share rate, check settings.");
+	}
+	
+	gettimeofday( &now, NULL );
+	timeval_subtract( &et, &now, &five_min_start );
+
+#if !(defined(__WINDOWS__) || defined(_WIN64) || defined(_WIN32) || defined(__APPLE__))
+	// Display CPU temperature and clock rate
+	if ( !opt_quiet || ( curr_temp >= 80 ) ) {
+		int wait_time = curr_temp >= 90 ? 5
+		            : curr_temp >= 80 ? 30
+		            : curr_temp >= 70 ? 60 : 120;
+		timeval_subtract( &diff, &now, &cpu_temp_time );
+		if ( ( diff.tv_sec > wait_time )
+		  || ( ( curr_temp > prev_temp ) && ( curr_temp >= 75 ) ) ) {
+			char tempstr[32];
+			float lo_freq = 0., hi_freq = 0.;
+			
+			memcpy( &cpu_temp_time, &now, sizeof(cpu_temp_time) );
+			linux_cpu_hilo_freq( &lo_freq, &hi_freq );
+			if ( use_colors && ( curr_temp >= 70 ) ) {
+				if ( curr_temp >= 80 )
+					sprintf( tempstr, "%s%d C%s", CL_RED, curr_temp, CL_WHT );
+				else
+					sprintf( tempstr, "%s%d C%s", CL_YLW, curr_temp, CL_WHT );
+			} else
+				sprintf( tempstr, "%d C", curr_temp );
+			
+			applog( LOG_NOTICE, "CPU temp: curr %s max %d, Freq: %.3f/%.3f GHz",
+			        tempstr, hi_temp, lo_freq / 1e6, hi_freq / 1e6 );
+			if ( curr_temp > hi_temp ) hi_temp = curr_temp;
+			if ( ( opt_max_temp > 0.0 ) && ( curr_temp > opt_max_temp ) )
+				restart_threads();
+			prev_temp = curr_temp;
+		}
+	}
+#endif
+	
+	// Check if we should report
+	if ( !( force && ( submit_sum || ( et.tv_sec > 5 ) ) ) ) {
+		if ( et.tv_sec < 300 )
+			return;
+			return;
+	}
+	
+	// Collect and reset periodic counters
+	pthread_mutex_lock( &stats_lock );
+	
+	uint64_t submits = submit_sum;  submit_sum = 0;
+	uint64_t accepts = accept_sum;  accept_sum = 0;
+	uint64_t rejects = reject_sum;  reject_sum = 0;
+	uint64_t stales  = stale_sum;   stale_sum  = 0;
+	uint64_t solved  = solved_sum;  solved_sum = 0;
+	memcpy( &start_time, &five_min_start, sizeof start_time );
+	memcpy( &five_min_start, &now, sizeof now );
+	
+	pthread_mutex_unlock( &stats_lock );
+	
+	timeval_subtract( &et, &now, &start_time );
+	timeval_subtract( &uptime, &total_hashes_time, &session_start );
+	
+	double share_time = (double)et.tv_sec + (double)et.tv_usec * 1e-6;
+	double ghrate = safe_div( total_hashes, (double)uptime.tv_sec, 0. );
+	double target_diff = EXP32 * last_targetdiff;
+	double shrate = safe_div( target_diff * (double)(accepts),
+	                          share_time, 0. );
+	double sess_hrate = safe_div( EXP32 * norm_diff_sum,
+	                              (double)uptime.tv_sec, 0. );
+	double submit_rate = safe_div( (double)submits * 60., share_time, 0. );
+	char shr_units[4] = {0};
+	char ghr_units[4] = {0};
+	char sess_hr_units[4] = {0};
+	char et_str[24];
+	char upt_str[24];
+	
+	scale_hash_for_display( &shrate, shr_units );
+	scale_hash_for_display( &ghrate, ghr_units );
+	scale_hash_for_display( &sess_hrate, sess_hr_units );
+	
+	sprintf_et( et_str, et.tv_sec );
+	sprintf_et( upt_str, uptime.tv_sec );
+	
+	applog( LOG_BLUE, "%s: %s", algo_names[ opt_algo ], rpc_url );
+	applog( LOG_NOTICE, "Periodic Report     %s        %s", et_str, upt_str );
+	applog( LOG_INFO, "Share rate        %.2f/min     %.2f/min",
+	         submit_rate, safe_div( (double)submitted_share_count*60.,
+	           ( (double)uptime.tv_sec + (double)uptime.tv_usec * 1e-6 ), 0. ) );
+	applog( LOG_INFO, "Hash rate       %7.2f%sh/s   %7.2f%sh/s   (%.2f%sh/s)",
+	         shrate, shr_units, sess_hrate, sess_hr_units, ghrate, ghr_units );
+	
+	if ( accepted_share_count < submitted_share_count ) {
+		double lost_ghrate = safe_div( target_diff
+	                    * (double)(submitted_share_count - accepted_share_count ),
+	                    (double)uptime.tv_sec, 0. );
+		double lost_shrate = safe_div( target_diff * (double)(submits - accepts ),
+		                               share_time, 0. );
+		char lshr_units[4] = {0};
+		char lghr_units[4] = {0};
+		scale_hash_for_display( &lost_shrate, lshr_units );
+		scale_hash_for_display( &lost_ghrate, lghr_units );
+		applog( LOG_INFO, "Lost hash rate  %7.2f%sh/s    %7.2f%sh/s",
+		         lost_shrate, lshr_units, lost_ghrate, lghr_units );
+	}
+	
+	applog( LOG_INFO, "Submitted       %7d      %7d",
+	            submits, submitted_share_count );
+	applog( LOG_INFO, "Accepted        %7d      %7d      %5.1f%%",
+	           accepts, accepted_share_count,
+	           100. * safe_div( (double)accepted_share_count, 
+	                            (double)submitted_share_count, 0. ) );
+	if ( stale_share_count ) {
+		int prio = stales ? LOG_MINR : LOG_INFO;
+		applog( prio, "Stale           %7d      %7d      %5.1f%%",
+		                stales, stale_share_count,
+		                100. * safe_div( (double)stale_share_count,
+		                                 (double)submitted_share_count, 0. ) );
+	}
+	if ( rejected_share_count ) {
+		int prio = rejects ? LOG_ERR : LOG_INFO;
+		applog( prio, "Rejected        %7d      %7d      %5.1f%%",
+		                rejects, rejected_share_count,
+		                100. * safe_div( (double)rejected_share_count,
+		                                 (double)submitted_share_count, 0. ) );
+	}
+	if ( solved_block_count ) {
+		int prio = solved ? LOG_PINK : LOG_INFO;
+		applog( prio, "Blocks Solved   %7d      %7d",
+		         solved, solved_block_count );
+	}
+	if ( stratum_errors )
+		applog( LOG_INFO, "Stratum resets               %7d", stratum_errors );
+	
+	applog( LOG_INFO, "Hi/Lo Share Diff  %.5g /  %.5g",
+	         highest_share, lowest_share );
+	
+	int mismatch = submitted_share_count
+	      - ( accepted_share_count + stale_share_count + rejected_share_count );
+	
+	if ( mismatch ) {
+		if ( stratum_errors )
+			applog( LOG_MINR, "Count mismatch: %d, stats may be inaccurate",
+			                   mismatch );
+		else if ( !opt_quiet )
+			applog( LOG_INFO, CL_LBL
+			         "Count mismatch, submitted share may still be pending" CL_N );
+	}
+}
 
 static char const short_options[] =
 #ifdef HAVE_SYSLOG_H
@@ -231,6 +445,193 @@ static void affine_to_cpu_mask( int id, unsigned long long mask )
    }
 }
 
+/* ------------------------------------------------------------------------
+ * --cache-fit: topology-aware thread count and affinity.
+ *
+ * Selects only as many physical cores per L3 complex (CCX) as fit the
+ * per-thread scratchpad (default 8 MB for all yespower variants) in that
+ * L3, and pins thread N to the Nth selected core.  NUMA-aware: each
+ * thread also sets a preferred memory policy for its local node, so the
+ * scratchpad stays on local DRAM channels even under memory pressure.
+ *
+ * Measured on EPYC 7642 (16 CCX x 16MB L3, yespower): 2 cores per CCX
+ * selected, 7771 H/s vs 7016 H/s using all 48 cores.  Note this is NOT
+ * always a win: on 7950X3D the plain-CCD threads earn more oversubscribed
+ * than capped, so keep this opt-in.
+ */
+static int cachefit_cpu[CPU_SETSIZE];
+static int cachefit_node[CPU_SETSIZE];
+static int cachefit_n = 0;
+
+static int sysfs_read_line( char *buf, size_t sz, const char *fmt, ... )
+{
+   char path[128];
+   va_list ap;
+   va_start( ap, fmt );
+   vsnprintf( path, sizeof(path), fmt, ap );
+   va_end( ap );
+   FILE *f = fopen( path, "r" );
+   if ( !f ) return -1;
+   if ( !fgets( buf, sz, f ) ) { fclose(f); return -1; }
+   fclose( f );
+   buf[ strcspn( buf, "\n" ) ] = 0;
+   return 0;
+}
+
+/* first CPU number in a sysfs cpulist like "3-5,51-53" */
+static int cpulist_first( const char *s )
+{
+   return atoi( s );
+}
+
+static int cpu_is_primary_sibling( int cpu )
+{
+   char buf[256];
+   if ( sysfs_read_line( buf, sizeof(buf),
+        "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu ) )
+      return 1;  /* no SMT info: treat as primary */
+   return cpulist_first( buf ) == cpu;
+}
+
+/* L3 size in KB for this CPU, and its L3 group key (shared_cpu_list) */
+static int cpu_l3_kb( int cpu, char *group, size_t group_sz )
+{
+   char buf[256];
+   for ( int idx = 3; idx >= 2; idx-- )
+   {
+      if ( sysfs_read_line( buf, sizeof(buf),
+           "/sys/devices/system/cpu/cpu%d/cache/index%d/level", cpu, idx ) )
+         continue;
+      if ( atoi( buf ) != 3 ) continue;
+      if ( sysfs_read_line( group, group_sz,
+           "/sys/devices/system/cpu/cpu%d/cache/index%d/shared_cpu_list",
+           cpu, idx ) )
+         continue;
+      if ( sysfs_read_line( buf, sizeof(buf),
+           "/sys/devices/system/cpu/cpu%d/cache/index%d/size", cpu, idx ) )
+         continue;
+      return atoi( buf );  /* "16384K" */
+   }
+   return 0;
+}
+
+static int cpu_numa_node( int cpu )
+{
+   char path[128];
+   for ( int node = 0; node < 64; node++ )
+   {
+      snprintf( path, sizeof(path),
+                "/sys/devices/system/node/node%d/cpu%d", node, cpu );
+      if ( access( path, F_OK ) == 0 ) return node;
+   }
+   return -1;
+}
+
+#define CACHEFIT_MAX_GROUPS 128
+
+static void cache_fit_detect( int ws_mb )
+{
+   cpu_set_t proc_set;
+   char group_key[CACHEFIT_MAX_GROUPS][256];
+   int  group_used[CACHEFIT_MAX_GROUPS];
+   int  group_quota[CACHEFIT_MAX_GROUPS];
+   int  n_groups = 0;
+   int  node_threads[64] = {0};
+   int  max_node = -1;
+
+   cachefit_n = 0;
+   CPU_ZERO( &proc_set );
+   if ( sched_getaffinity( 0, sizeof(proc_set), &proc_set ) )
+   {
+      applog( LOG_WARNING, "cache-fit: sched_getaffinity failed, disabled" );
+      return;
+   }
+
+   for ( int cpu = 0; cpu < CPU_SETSIZE && cachefit_n < CPU_SETSIZE; cpu++ )
+   {
+      char key[256];
+      int g, l3kb;
+
+      if ( !CPU_ISSET( cpu, &proc_set ) ) continue;
+      if ( !cpu_is_primary_sibling( cpu ) ) continue;
+      l3kb = cpu_l3_kb( cpu, key, sizeof(key) );
+      if ( l3kb <= 0 ) continue;
+
+      for ( g = 0; g < n_groups; g++ )
+         if ( !strcmp( group_key[g], key ) ) break;
+      if ( g == n_groups )
+      {
+         if ( n_groups == CACHEFIT_MAX_GROUPS ) continue;
+         strcpy( group_key[g], key );
+         group_used[g] = 0;
+         group_quota[g] = l3kb / ( ws_mb * 1024 );
+         if ( group_quota[g] < 1 ) group_quota[g] = 1;
+         n_groups++;
+      }
+      if ( group_used[g] >= group_quota[g] ) continue;
+      group_used[g]++;
+
+      cachefit_cpu[cachefit_n] = cpu;
+      cachefit_node[cachefit_n] = cpu_numa_node( cpu );
+      if ( cachefit_node[cachefit_n] >= 0 )
+      {
+         node_threads[ cachefit_node[cachefit_n] ]++;
+         if ( cachefit_node[cachefit_n] > max_node )
+            max_node = cachefit_node[cachefit_n];
+      }
+      cachefit_n++;
+   }
+
+   if ( !cachefit_n )
+   {
+      applog( LOG_WARNING, "cache-fit: no topology info in sysfs, disabled" );
+      return;
+   }
+
+   applog( LOG_INFO,
+           "cache-fit: %d threads on %d L3 group(s), %d MB working set",
+           cachefit_n, n_groups, ws_mb );
+   for ( int node = 0; node <= max_node; node++ )
+      if ( node_threads[node] )
+         applog( LOG_INFO, "cache-fit: NUMA node %d: %d thread(s)",
+                 node, node_threads[node] );
+}
+
+/* Pin thread thr_id to its selected core and prefer local-node memory.
+ * Returns false if cache-fit is not active. */
+#include <sys/syscall.h>
+#ifndef MPOL_PREFERRED
+#define MPOL_PREFERRED 1
+#endif
+
+static bool cache_fit_pin_thread( int thr_id )
+{
+   if ( !cachefit_n ) return false;
+
+   int slot = thr_id % cachefit_n;
+   int cpu  = cachefit_cpu[slot];
+   int node = cachefit_node[slot];
+
+   cpu_set_t set;
+   CPU_ZERO( &set );
+   CPU_SET( cpu, &set );
+   pthread_setaffinity_np( thr_info[thr_id].pth, sizeof(set), &set );
+
+#ifdef SYS_set_mempolicy
+   if ( node >= 0 && node < (int)(sizeof(unsigned long) * 8) )
+   {
+      unsigned long nodemask = 1UL << node;
+      syscall( SYS_set_mempolicy, MPOL_PREFERRED, &nodemask,
+               sizeof(nodemask) * 8 + 1 );
+   }
+#endif
+
+   if ( opt_debug )
+      applog( LOG_DEBUG, "cache-fit: thread %d -> CPU %d (node %d)",
+              thr_id, cpu, node );
+   return true;
+}
+
 #elif defined(WIN32) /* Windows */
 static inline void drop_policy(void) { }
 static void affine_to_cpu_mask(int id, unsigned long mask) {
@@ -239,9 +640,15 @@ static void affine_to_cpu_mask(int id, unsigned long mask) {
 	else
 		SetThreadAffinityMask(GetCurrentThread(), mask);
 }
+static bool cache_fit_pin_thread( int thr_id ) { return false; }
+static void cache_fit_detect( int ws_mb ) { }
+static int cachefit_n = 0;
 #else
 static inline void drop_policy(void) { }
 static void affine_to_cpu_mask(int id, unsigned long mask) { }
+static bool cache_fit_pin_thread( int thr_id ) { return false; }
+static void cache_fit_detect( int ws_mb ) { }
+static int cachefit_n = 0;
 #endif
 
 // not very useful, just index the arrray directly.
@@ -797,24 +1204,43 @@ static int share_result( int result, struct work *work, const char *reason )
    char sol[32] = {0};
    int i;
 
-   pthread_mutex_lock(&stats_lock);
-   for (i = 0; i < opt_n_threads; i++)
-   {
-       hashcount += thr_hashcount[i];
-       hashrate += thr_hashrates[i];
-   }
-   result ? accepted_count++ : rejected_count++;
+    pthread_mutex_lock(&stats_lock);
+    for (i = 0; i < opt_n_threads; i++)
+    {
+        hashcount += thr_hashcount[i];
+        hashrate += thr_hashrates[i];
+    }
+    submit_sum++;
+    if (result) {
+        accepted_count++;
+        accept_sum++;
+        if (work && work->sharediff > 0.) {
+            if (work->sharediff < lowest_share)
+                lowest_share = work->sharediff;
+            if (work->sharediff > highest_share)
+                highest_share = work->sharediff;
+            norm_diff_sum += work->sharediff;
+        }
+    } else {
+        if (reason && (strstr(reason, "job") || strstr(reason, "Job")))
+            stale_sum++;
+        else if (work && work->data[algo_gate.ntime_index] != g_work.data[algo_gate.ntime_index])
+            stale_sum++;
+        else
+            reject_sum++;
+    }
 
-   if ( solved )
-   {
-      solved_count++;
-      if ( use_colors )
-         sprintf( sol, CL_GRN " Solved" CL_WHT " %d", solved_count );      
-      else
-         sprintf( sol, " Solved %d", solved_count ); 
-   }
+    if ( solved )
+    {
+       solved_count++;
+       solved_sum++;
+       if ( use_colors )
+          sprintf( sol, CL_GRN " Solved" CL_WHT " %d", solved_count );      
+       else
+          sprintf( sol, " Solved %d", solved_count ); 
+    }
 
-   pthread_mutex_unlock(&stats_lock);
+    pthread_mutex_unlock(&stats_lock);
    global_hashcount = hashcount;
    global_hashrate = hashrate;
    total_submits = accepted_count + rejected_count;
@@ -1128,10 +1554,12 @@ static bool submit_upstream_work( CURL *curl, struct work *work )
       }
    }
 
-   if ( have_stratum )
-   {
-       char req[JSON_BUF_LEN];
-       stratum.sharediff = work->sharediff;
+    if ( have_stratum )
+    {
+        char req[JSON_BUF_LEN];
+        stratum.sharediff = work->sharediff;
+        if (work->sharediff != last_targetdiff)
+            last_targetdiff = work->sharediff;
        algo_gate.build_stratum_request( req, work, &stratum );
        if ( unlikely( !stratum_send_line( &stratum, req ) ) )
        {
@@ -1785,7 +2213,11 @@ static void *miner_thread( void *userdata )
    }
    else
 */
-   if ( num_cpus > 1 )
+   if ( cache_fit_pin_thread( thr_id ) )
+   {
+      /* pinned to its CCX-quota core with local-node memory policy */
+   }
+   else if ( num_cpus > 1 )
    {
       if ( (opt_affinity == -1LL) && (opt_n_threads) > 1 )
       {
@@ -1946,10 +2378,12 @@ static void *miner_thread( void *userdata )
        if ( diff.tv_usec || diff.tv_sec )
        {
           pthread_mutex_lock( &stats_lock );
-          thr_hashcount[thr_id] = hashes_done;
-	  thr_hashrates[thr_id] =
-		hashes_done / ( diff.tv_sec + diff.tv_usec * 1e-6 );
-	  pthread_mutex_unlock( &stats_lock );
+           thr_hashcount[thr_id] = hashes_done;
+ 	  thr_hashrates[thr_id] =
+ 		hashes_done / ( diff.tv_sec + diff.tv_usec * 1e-6 );
+            total_hashes += hashes_done;
+            total_hashes_time_double += diff.tv_sec + diff.tv_usec * 1e-6;
+ 	  pthread_mutex_unlock( &stats_lock );
        }
 
        // if nonce(s) found submit work 
@@ -1988,29 +2422,32 @@ static void *miner_thread( void *userdata )
              pthread_mutex_unlock( &g_work_lock );
           }
        }
-       // display hashrate
-       if ( !opt_quiet )
-       {
-          char hc[16];
-          char hr[16];
-          char hc_units[2] = {0,0};
-          char hr_units[2] = {0,0};
-          double hashcount = thr_hashcount[thr_id];
-          double hashrate  = thr_hashrates[thr_id];
-          if ( hashcount )
-          {
-             scale_hash_for_display( &hashcount, hc_units );
-             scale_hash_for_display( &hashrate,  hr_units );
-             if ( hc_units[0] )
-                sprintf( hc, "%.2f", hashcount );
-             else // no fractions of a hash
-                sprintf( hc, "%.0f", hashcount );
-             sprintf( hr, "%.2f", hashrate );
-             applog( LOG_INFO, "CPU #%d: %s %sH, %s %sH/s",
-                               thr_id, hc, hc_units, hr, hr_units );
-          }
-       }
-       // Display benchmark total
+        // display hashrate
+        if ( !opt_quiet )
+        {
+           char hc[16];
+           char hr[16];
+           char hc_units[2] = {0,0};
+           char hr_units[2] = {0,0};
+           double hashcount = thr_hashcount[thr_id];
+           double hashrate  = thr_hashrates[thr_id];
+           if ( hashcount )
+           {
+              scale_hash_for_display( &hashcount, hc_units );
+              scale_hash_for_display( &hashrate,  hr_units );
+              if ( hc_units[0] )
+                 sprintf( hc, "%.2f", hashcount );
+              else // no fractions of a hash
+                 sprintf( hc, "%.0f", hashcount );
+              sprintf( hr, "%.2f", hashrate );
+              applog( LOG_INFO, "CPU #%d: %s %sH, %s %sH/s",
+                                thr_id, hc, hc_units, hr, hr_units );
+           }
+        }
+        // Enhanced periodic reporting (thread 0 only)
+        if ( thr_id == 0 )
+           report_summary_log( false );
+        // Display benchmark total
        // Update hashrate for API if no shares accepted yet.
        if ( ( opt_benchmark || !accepted_count ) 
             && thr_id == opt_n_threads - 1 )
@@ -2396,17 +2833,18 @@ static void *stratum_thread(void *userdata )
 
 	if ( stratum_need_reset )
         {
-           stratum_need_reset = false;
-	   stratum_disconnect( &stratum );
-	   if ( strcmp( stratum.url, rpc_url ) )
-           {
-		free( stratum.url );
-		stratum.url = strdup( rpc_url );
-		applog(LOG_BLUE, "Connection changed to %s", short_url);
-	   }
-           else if ( !opt_quiet )
-		applog(LOG_DEBUG, "Stratum connection reset");
-	}
+            stratum_need_reset = false;
+            stratum_errors++;
+ 	   stratum_disconnect( &stratum );
+ 	   if ( strcmp( stratum.url, rpc_url ) )
+            {
+ 		free( stratum.url );
+ 		stratum.url = strdup( rpc_url );
+ 		applog(LOG_BLUE, "Connection changed to %s", short_url);
+ 	   }
+            else if ( !opt_quiet )
+ 		applog(LOG_DEBUG, "Stratum connection reset");
+ 	}
 
         while ( !stratum.curl )
         {
@@ -2880,6 +3318,11 @@ void parse_arg(int key, char *arg )
 			show_usage_and_exit(1);
 		opt_priority = v;
 		break;
+	case 1027:  /* --cache-fit[=MB] */
+		opt_cache_fit = arg ? atoi(arg) : 8;
+		if (opt_cache_fit < 1 || opt_cache_fit > 1024)
+			show_usage_and_exit(1);
+		break;
 	case 1060: // max-temp
 		d = atof(arg);
 		opt_max_temp = d;
@@ -3211,6 +3654,13 @@ int main(int argc, char *argv[])
 		num_cpus = 1;
 
 	parse_cmdline(argc, argv);
+
+        if (opt_cache_fit)
+        {
+                cache_fit_detect(opt_cache_fit);
+                if (cachefit_n && !opt_n_threads)
+                        opt_n_threads = cachefit_n;
+        }
 
         if (!opt_n_threads)
                 opt_n_threads = num_cpus;

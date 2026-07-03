@@ -1,4 +1,6 @@
-#if defined(CPU_X86) && (defined(COMPILER_MSVC) || defined(COMPILER_GCC))
+/* clang's integrated assembler rejects this file's Intel-syntax inline asm;
+ * use the portable/intrinsics fallbacks there */
+#if defined(CPU_X86) && (defined(COMPILER_MSVC) || defined(COMPILER_GCC)) && !defined(__clang__)
 	#define X86ASM
 
 	/* gcc 2.95 royally screws up stack alignments on variables */
@@ -18,7 +20,7 @@
 	#endif
 #endif
 
-#if defined(CPU_X86_64) && defined(COMPILER_GCC)
+#if defined(CPU_X86_64) && defined(COMPILER_GCC) && !defined(__clang__)
 	#define X86_64ASM
 	#define X86_64ASM_SSE2
 	#if (COMPILER_GCC >= 40102)
@@ -299,6 +301,10 @@ static void NOINLINE
 get_cpuid(x86_regs *regs, uint32_t flags) {
 #if defined(COMPILER_MSVC)
 	__cpuid((int *)regs, (int)flags);
+#elif defined(__clang__)
+	__asm__ __volatile__("cpuid"
+	    : "=a"(regs->eax), "=b"(regs->ebx), "=c"(regs->ecx), "=d"(regs->edx)
+	    : "a"(flags), "c"(0));
 #else
 	#if defined(CPU_X86_64)
 		#define cpuid_bx rbx

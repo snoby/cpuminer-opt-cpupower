@@ -129,6 +129,14 @@ void applog(int prio, const char *fmt, ...)
 				prio = LOG_NOTICE;
 				color = CL_CYN;
 				break;
+			case LOG_PINK:
+				prio = LOG_NOTICE;
+				color = CL_PNK;
+				break;
+			case LOG_MINR:
+				prio = LOG_NOTICE;
+				color = CL_WHT;
+				break;
 		}
 		if (!use_colors)
 			color = "";

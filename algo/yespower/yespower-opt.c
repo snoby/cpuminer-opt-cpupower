@@ -37,7 +37,6 @@
  * both algorithms to co-exist in client and miner implementations (such as in
  * preparation for a hard-fork).
  */
-#include <immintrin.h> 
 #ifndef _YESPOWER_OPT_C_PASS_
 #define _YESPOWER_OPT_C_PASS_ 1
 #endif
@@ -414,8 +413,8 @@ typedef struct {
 #define DECL_SMASK2REG uint64_t Smask2reg = Smask2;
 /* Force use of lower-numbered registers to reduce number of prefixes, relying
  * on out-of-order execution and register renaming. */
-// rms #define FORCE_REGALLOC_1  __asm__("" : "=a" (x), "+d" (Smask2reg), "+S" (S0), "+D" (S1));
-// rms #define FORCE_REGALLOC_2 __asm__("" : : "c" (lo));
+/* Upstream forces registers here to cut REX prefixes for GCC, but clang's
+ * allocator does better unconstrained (measured: 5085 vs 5010 H/s). */
 #define FORCE_REGALLOC_1 /* empty */
 #define FORCE_REGALLOC_2 /* empty */
 #else
@@ -461,45 +460,6 @@ static volatile uint64_t Smask2var = Smask2;
 	w += 16; \
 	PWXFORM_SIMD(X2) \
 	PWXFORM_SIMD(X3)
-
-
-
-#else /* !defined(__SSE2__) */
-#if 0
-#define PWXFORM_SIMD(x0, x1) { \
-	uint64_t x = x0 & Smask2; \
-	uint64_t *p0 = (uint64_t *)(S0 + (uint32_t)x); \
-	uint64_t *p1 = (uint64_t *)(S1 + (x >> 32)); \
-	x0 = ((x0 >> 32) * (uint32_t)x0 + p0[0]) ^ p1[0]; \
-	x1 = ((x1 >> 32) * (uint32_t)x1 + p0[1]) ^ p1[1]; \
-}
-
-#define PWXFORM_SIMD_WRITE(x0, x1, Sw) \
-	PWXFORM_SIMD(x0, x1) \
-	((uint64_t *)(Sw + w))[0] = x0; \
-	((uint64_t *)(Sw + w))[1] = x1;
-
-#define PWXFORM_ROUND \
-	PWXFORM_SIMD(X.d[0], X.d[1]) \
-	PWXFORM_SIMD(X.d[2], X.d[3]) \
-	PWXFORM_SIMD(X.d[4], X.d[5]) \
-	PWXFORM_SIMD(X.d[6], X.d[7])
-
-#define PWXFORM_ROUND_WRITE4 \
-	PWXFORM_SIMD_WRITE(X.d[0], X.d[1], S0) \
-	PWXFORM_SIMD_WRITE(X.d[2], X.d[3], S1) \
-	w += 16; \
-	PWXFORM_SIMD_WRITE(X.d[4], X.d[5], S0) \
-	PWXFORM_SIMD_WRITE(X.d[6], X.d[7], S1) \
-	w += 16;
-
-#define PWXFORM_ROUND_WRITE2 \
-	PWXFORM_SIMD_WRITE(X.d[0], X.d[1], S0) \
-	PWXFORM_SIMD_WRITE(X.d[2], X.d[3], S1) \
-	w += 16; \
-	PWXFORM_SIMD(X.d[4], X.d[5]) \
-	PWXFORM_SIMD(X.d[6], X.d[7])
-#endif 
 #endif
 
 #define PWXFORM \

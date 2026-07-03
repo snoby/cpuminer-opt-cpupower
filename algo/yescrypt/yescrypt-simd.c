@@ -150,8 +150,7 @@ typedef union {
  * bytes in length; the output Bout must also be the same size.
  */
 static inline void
-blockmix_salsa8(const salsa20_blk_t *restrict Bin,
-    salsa20_blk_t *restrict Bout, size_t r)
+blockmix_salsa8(const salsa20_blk_t *restrict Bin, salsa20_blk_t *restrict Bout, size_t r)
 {
 	__m128i X0, X1, X2, X3;
 	size_t i;

@@ -3,7 +3,7 @@
 
 #include "compat.h"
 
-#if defined(__GNUC__) && !defined(__INTEL_COMPILER)
+#if defined(__GNUC__) && !defined(__INTEL_COMPILER) && !defined(__clang__)
 
 /******************************* 
  * Using GCC vector extensions * 
