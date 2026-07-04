@@ -137,6 +137,8 @@ char *rpc2_blob = NULL;
 size_t rpc2_bloblen = 0;
 uint32_t rpc2_target = 0;
 char *rpc2_job_id = NULL;
+uint32_t rpc2_target32[8] = { 0 };
+uint8_t g_nm_seed_hash[32] = { 0 };
 double opt_diff_factor = 1.0;
 uint32_t zr5_pok = 0;
 bool opt_stratum_stats = false;
@@ -1891,7 +1893,15 @@ static bool get_work(struct thr_info *thr, struct work *work)
                 work->data[algo_gate.ntime_index] = swab32(ts);  // ntime
   
               // this overwrites much of the for loop init
-                memset( work->data + algo_gate.nonce_index, 0x00, 52);  // nonce..nonce+52
+                // nonce_index is a BYTE offset for jsonrpc_2/JR2 algos (see the
+                // warning on algo_gate.nonce_index in algo-gate-api.h) but a
+                // uint32_t WORD index for std algos -- pointer arithmetic on
+                // work->data (uint32_t*) must match whichever convention is
+                // in effect or this silently writes out of bounds.
+                if ( jsonrpc_2 )
+                   memset( (uint8_t*)work->data + algo_gate.nonce_index, 0x00, 52);
+                else
+                   memset( work->data + algo_gate.nonce_index, 0x00, 52);  // nonce..nonce+52
 		work->data[20] = 0x80000000;  // extraheader not used for jr2
 		work->data[31] = 0x00000280;  // extraheader not used for jr2
 		return true;

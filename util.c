@@ -1642,8 +1642,12 @@ bool rpc2_job_decode(const json_t *job, struct work *work)
 		applog(LOG_ERR, "JSON invalid blob length");
 		goto err_out;
 	}
+	/* NeuroMorph (Cereblix CRB) jobs are self-describing: a "seed_hash" key
+	 * marks this jsonrpc_2 job as NM-shaped (32-byte big-endian target +
+	 * per-epoch seed) rather than the cryptonight-style compact target. */
+	json_t *seed_tmp = json_object_get(job, "seed_hash");
+
 	if (blobLen != 0) {
-		uint32_t target = 0;
 		pthread_mutex_lock(&rpc2_job_lock);
 		uchar *blob = (uchar*) malloc(blobLen / 2);
 		if (!hex2bin(blob, hexblob, blobLen / 2)) {
@@ -1656,25 +1660,66 @@ bool rpc2_job_decode(const json_t *job, struct work *work)
 		rpc2_blob = (char*) malloc(rpc2_bloblen);
 		if (!rpc2_blob)  {
 			applog(LOG_ERR, "RPC2 OOM!");
+			pthread_mutex_unlock(&rpc2_job_lock);
 			goto err_out;
 		}
 		memcpy(rpc2_blob, blob, blobLen / 2);
 		free(blob);
 
-		jobj_binary(job, "target", &target, 4);
-		if(rpc2_target != target)
-                {
-   		   double hashrate = 0.0;
-                   pthread_mutex_lock(&stats_lock);
-		   for (int i = 0; i < opt_n_threads; i++)
-		      hashrate += thr_hashrates[i];
-                   pthread_mutex_unlock(&stats_lock);
-		   double diff = trunc( ( ((double)0xffffffff) / target ) );
-		   if ( opt_showdiff )
-		      // xmr pool diff can change a lot...
-		      applog(LOG_WARNING, "Stratum difficulty set to %g", diff);
-		   stratum_diff = diff;
-		   rpc2_target = target;
+		if (seed_tmp) {
+			/* NeuroMorph job: 32-byte big-endian target + epoch seed_hash */
+			uint8_t seed32[32];
+			if (!jobj_binary(job, "seed_hash", seed32, 32)) {
+				applog(LOG_ERR, "JSON invalid seed_hash");
+				pthread_mutex_unlock(&rpc2_job_lock);
+				goto err_out;
+			}
+			memcpy(g_nm_seed_hash, seed32, 32);
+
+			uint8_t target_be[32];
+			if (!jobj_binary(job, "target", target_be, 32)) {
+				applog(LOG_ERR, "JSON invalid 32-byte target");
+				pthread_mutex_unlock(&rpc2_job_lock);
+				goto err_out;
+			}
+			uint32_t new_target32[8];
+			/* raw 32-byte big-endian buffer -> fulltest()'s word order:
+			 * word[7-i] = be32dec(buf + 4*i) for i = 0..7 */
+			for (int i = 0; i < 8; i++)
+				new_target32[7 - i] = be32dec(target_be + 4 * i);
+
+			if (memcmp(rpc2_target32, new_target32, sizeof(rpc2_target32)) != 0) {
+				double hashrate = 0.0;
+				pthread_mutex_lock(&stats_lock);
+				for (int i = 0; i < opt_n_threads; i++)
+					hashrate += thr_hashrates[i];
+				pthread_mutex_unlock(&stats_lock);
+				/* full 256-bit target -> approximate diff, same shape as
+				 * the compact-target formula but over the whole target */
+				double diff = trunc( ( ((double)0xffffffff) /
+				                       (new_target32[7] ? new_target32[7] : 1) ) );
+				if ( opt_showdiff )
+					applog(LOG_WARNING, "Stratum difficulty set to %g", diff);
+				stratum_diff = diff;
+				memcpy(rpc2_target32, new_target32, sizeof(rpc2_target32));
+			}
+		} else {
+			uint32_t target = 0;
+			jobj_binary(job, "target", &target, 4);
+			if(rpc2_target != target)
+	                {
+	   		   double hashrate = 0.0;
+	                   pthread_mutex_lock(&stats_lock);
+			   for (int i = 0; i < opt_n_threads; i++)
+			      hashrate += thr_hashrates[i];
+	                   pthread_mutex_unlock(&stats_lock);
+			   double diff = trunc( ( ((double)0xffffffff) / target ) );
+			   if ( opt_showdiff )
+			      // xmr pool diff can change a lot...
+			      applog(LOG_WARNING, "Stratum difficulty set to %g", diff);
+			   stratum_diff = diff;
+			   rpc2_target = target;
+			}
 		}
 
 		if (rpc2_job_id) free(rpc2_job_id);
@@ -1687,8 +1732,12 @@ bool rpc2_job_decode(const json_t *job, struct work *work)
 			goto err_out;
 		}
 		memcpy(work->data, rpc2_blob, rpc2_bloblen);
-		memset(work->target, 0xff, sizeof(work->target));
-		work->target[7] = rpc2_target;
+		if (seed_tmp) {
+			memcpy(work->target, rpc2_target32, sizeof(work->target));
+		} else {
+			memset(work->target, 0xff, sizeof(work->target));
+			work->target[7] = rpc2_target;
+		}
 		if (work->job_id) free(work->job_id);
 		work->job_id = strdup(rpc2_job_id);
 	}
@@ -1697,6 +1746,16 @@ bool rpc2_job_decode(const json_t *job, struct work *work)
 err_out:
 	applog(LOG_WARNING, "%s", __func__);
 	return false;
+}
+
+/* Accessor for the NeuroMorph algo (algo/neuromorph/neuromorph.c): the
+ * current job's epoch seed_hash, as last written by rpc2_job_decode()
+ * above under rpc2_job_lock. */
+void nm_get_job_seed_hash( uint8_t out[32] )
+{
+	pthread_mutex_lock(&rpc2_job_lock);
+	memcpy(out, g_nm_seed_hash, 32);
+	pthread_mutex_unlock(&rpc2_job_lock);
 }
 
 /**

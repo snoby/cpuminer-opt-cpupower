@@ -179,10 +179,11 @@ am__cpuminer_SOURCES_DIST = cpu-miner.c util.c uint256.cpp api.c \
 	algo/yespower2b/yespower-miner.c \
 	algo/yespower2b/crypto/blake2b.c algo/yespower2b/yespower.c \
 	algo/yescrypt/yescrypt.c algo/yescrypt/sha256_Y.c \
-	algo/yescrypt/yescrypt-best.c asm/neoscrypt_asm.S \
-	asm/sha2-x86.S asm/scrypt-x86.S asm/aesb-x86.S asm/sha2-x64.S \
-	asm/scrypt-x64.S asm/aesb-x64.S asm/sha2-arm.S \
-	asm/scrypt-arm.S compat/winansi.c
+	algo/yescrypt/yescrypt-best.c algo/neuromorph/nm_params.c \
+	algo/neuromorph/nm_fast.c algo/neuromorph/neuromorph.c \
+	asm/neoscrypt_asm.S asm/sha2-x86.S asm/scrypt-x86.S \
+	asm/aesb-x86.S asm/sha2-x64.S asm/scrypt-x64.S asm/aesb-x64.S \
+	asm/sha2-arm.S asm/scrypt-arm.S compat/winansi.c
 am__dirstamp = $(am__leading_dot)dirstamp
 @USE_ASM_TRUE@am__objects_1 = asm/cpuminer-neoscrypt_asm.$(OBJEXT)
 @ARCH_x86_TRUE@@USE_ASM_TRUE@am__objects_2 =  \
@@ -322,8 +323,11 @@ am_cpuminer_OBJECTS = cpuminer-cpu-miner.$(OBJEXT) \
 	algo/yescrypt/cpuminer-yescrypt.$(OBJEXT) \
 	algo/yescrypt/cpuminer-sha256_Y.$(OBJEXT) \
 	algo/yescrypt/cpuminer-yescrypt-best.$(OBJEXT) \
-	$(am__objects_1) $(am__objects_2) $(am__objects_3) \
-	$(am__objects_4) $(am__objects_5)
+	algo/neuromorph/cpuminer-nm_params.$(OBJEXT) \
+	algo/neuromorph/cpuminer-nm_fast.$(OBJEXT) \
+	algo/neuromorph/cpuminer-neuromorph.$(OBJEXT) $(am__objects_1) \
+	$(am__objects_2) $(am__objects_3) $(am__objects_4) \
+	$(am__objects_5)
 cpuminer_OBJECTS = $(am_cpuminer_OBJECTS)
 cpuminer_DEPENDENCIES =
 cpuminer_LINK = $(CXXLD) $(AM_CXXFLAGS) $(CXXFLAGS) \
@@ -415,6 +419,9 @@ am__depfiles_remade = ./$(DEPDIR)/cpuminer-algo-gate-api.Po \
 	algo/luffa/$(DEPDIR)/cpuminer-luffa_for_sse2.Po \
 	algo/luffa/$(DEPDIR)/cpuminer-sph_luffa.Po \
 	algo/neoscrypt/$(DEPDIR)/cpuminer-neoscrypt.Po \
+	algo/neuromorph/$(DEPDIR)/cpuminer-neuromorph.Po \
+	algo/neuromorph/$(DEPDIR)/cpuminer-nm_fast.Po \
+	algo/neuromorph/$(DEPDIR)/cpuminer-nm_params.Po \
 	algo/ripemd/$(DEPDIR)/cpuminer-lbry-4way.Po \
 	algo/ripemd/$(DEPDIR)/cpuminer-lbry-gate.Po \
 	algo/ripemd/$(DEPDIR)/cpuminer-lbry.Po \
@@ -829,14 +836,25 @@ cpuminer_SOURCES = cpu-miner.c util.c uint256.cpp api.c sysinfos.c \
 	algo/yespower2b/yespower-miner.c \
 	algo/yespower2b/crypto/blake2b.c algo/yespower2b/yespower.c \
 	algo/yescrypt/yescrypt.c algo/yescrypt/sha256_Y.c \
-	algo/yescrypt/yescrypt-best.c $(am__append_1) $(am__append_2) \
-	$(am__append_3) $(am__append_4) $(am__append_6)
+	algo/yescrypt/yescrypt-best.c algo/neuromorph/nm_params.c \
+	algo/neuromorph/nm_fast.c algo/neuromorph/neuromorph.c \
+	$(am__append_1) $(am__append_2) $(am__append_3) \
+	$(am__append_4) $(am__append_6)
 disable_flags = $(am__append_5)
 cpuminer_LDFLAGS = @LDFLAGS@
 cpuminer_LDADD = @LIBCURL@ @JANSSON_LIBS@ @PTHREAD_LIBS@ @WS2_LIBS@ -lssl -lcrypto -lgmp
 cpuminer_CPPFLAGS = @LIBCURL_CPPFLAGS@ $(ALL_INCLUDES)
 cpuminer_CFLAGS = -Wno-pointer-sign -Wno-pointer-to-int-cast \
 	$(disable_flags) $(am__append_7)
+
+# NeuroMorph's consensus digest requires exact IEEE-754 semantics (isnan/isinf
+# checks in the VM's float path) -- these must never be built with
+# -ffast-math/-ffinite-math-only (see the caution comment atop nm_fast.c).
+# This override only wins if the global CFLAGS (e.g. from build.sh) doesn't
+# also pass -ffast-math after it; do not build this fork's -ffast-math
+# profile (build.sh) when mining neuromorph.
+algo_neuromorph_nm_fast_CFLAGS = $(cpuminer_CFLAGS) -fno-fast-math -fno-finite-math-only
+algo_neuromorph_neuromorph_CFLAGS = $(cpuminer_CFLAGS) -fno-fast-math -fno-finite-math-only
 
 # use to profile an object
 # gprof_cflags = -pg -g3
@@ -1461,6 +1479,21 @@ algo/yescrypt/cpuminer-sha256_Y.$(OBJEXT):  \
 algo/yescrypt/cpuminer-yescrypt-best.$(OBJEXT):  \
 	algo/yescrypt/$(am__dirstamp) \
 	algo/yescrypt/$(DEPDIR)/$(am__dirstamp)
+algo/neuromorph/$(am__dirstamp):
+	@$(MKDIR_P) algo/neuromorph
+	@: > algo/neuromorph/$(am__dirstamp)
+algo/neuromorph/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) algo/neuromorph/$(DEPDIR)
+	@: > algo/neuromorph/$(DEPDIR)/$(am__dirstamp)
+algo/neuromorph/cpuminer-nm_params.$(OBJEXT):  \
+	algo/neuromorph/$(am__dirstamp) \
+	algo/neuromorph/$(DEPDIR)/$(am__dirstamp)
+algo/neuromorph/cpuminer-nm_fast.$(OBJEXT):  \
+	algo/neuromorph/$(am__dirstamp) \
+	algo/neuromorph/$(DEPDIR)/$(am__dirstamp)
+algo/neuromorph/cpuminer-neuromorph.$(OBJEXT):  \
+	algo/neuromorph/$(am__dirstamp) \
+	algo/neuromorph/$(DEPDIR)/$(am__dirstamp)
 asm/$(am__dirstamp):
 	@$(MKDIR_P) asm
 	@: > asm/$(am__dirstamp)
@@ -1521,6 +1554,7 @@ mostlyclean-compile:
 	-rm -f algo/keccak/sse2/*.$(OBJEXT)
 	-rm -f algo/luffa/*.$(OBJEXT)
 	-rm -f algo/neoscrypt/*.$(OBJEXT)
+	-rm -f algo/neuromorph/*.$(OBJEXT)
 	-rm -f algo/ripemd/*.$(OBJEXT)
 	-rm -f algo/scryptjane/*.$(OBJEXT)
 	-rm -f algo/sha/*.$(OBJEXT)
@@ -1616,6 +1650,9 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@algo/luffa/$(DEPDIR)/cpuminer-luffa_for_sse2.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@algo/luffa/$(DEPDIR)/cpuminer-sph_luffa.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@algo/neoscrypt/$(DEPDIR)/cpuminer-neoscrypt.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@algo/neuromorph/$(DEPDIR)/cpuminer-neuromorph.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@algo/neuromorph/$(DEPDIR)/cpuminer-nm_fast.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@algo/neuromorph/$(DEPDIR)/cpuminer-nm_params.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@algo/ripemd/$(DEPDIR)/cpuminer-lbry-4way.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@algo/ripemd/$(DEPDIR)/cpuminer-lbry-gate.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@algo/ripemd/$(DEPDIR)/cpuminer-lbry.Po@am__quote@ # am--include-marker
@@ -3624,6 +3661,48 @@ algo/yescrypt/cpuminer-yescrypt-best.obj: algo/yescrypt/yescrypt-best.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -c -o algo/yescrypt/cpuminer-yescrypt-best.obj `if test -f 'algo/yescrypt/yescrypt-best.c'; then $(CYGPATH_W) 'algo/yescrypt/yescrypt-best.c'; else $(CYGPATH_W) '$(srcdir)/algo/yescrypt/yescrypt-best.c'; fi`
 
+algo/neuromorph/cpuminer-nm_params.o: algo/neuromorph/nm_params.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -MT algo/neuromorph/cpuminer-nm_params.o -MD -MP -MF algo/neuromorph/$(DEPDIR)/cpuminer-nm_params.Tpo -c -o algo/neuromorph/cpuminer-nm_params.o `test -f 'algo/neuromorph/nm_params.c' || echo '$(srcdir)/'`algo/neuromorph/nm_params.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) algo/neuromorph/$(DEPDIR)/cpuminer-nm_params.Tpo algo/neuromorph/$(DEPDIR)/cpuminer-nm_params.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='algo/neuromorph/nm_params.c' object='algo/neuromorph/cpuminer-nm_params.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -c -o algo/neuromorph/cpuminer-nm_params.o `test -f 'algo/neuromorph/nm_params.c' || echo '$(srcdir)/'`algo/neuromorph/nm_params.c
+
+algo/neuromorph/cpuminer-nm_params.obj: algo/neuromorph/nm_params.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -MT algo/neuromorph/cpuminer-nm_params.obj -MD -MP -MF algo/neuromorph/$(DEPDIR)/cpuminer-nm_params.Tpo -c -o algo/neuromorph/cpuminer-nm_params.obj `if test -f 'algo/neuromorph/nm_params.c'; then $(CYGPATH_W) 'algo/neuromorph/nm_params.c'; else $(CYGPATH_W) '$(srcdir)/algo/neuromorph/nm_params.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) algo/neuromorph/$(DEPDIR)/cpuminer-nm_params.Tpo algo/neuromorph/$(DEPDIR)/cpuminer-nm_params.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='algo/neuromorph/nm_params.c' object='algo/neuromorph/cpuminer-nm_params.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -c -o algo/neuromorph/cpuminer-nm_params.obj `if test -f 'algo/neuromorph/nm_params.c'; then $(CYGPATH_W) 'algo/neuromorph/nm_params.c'; else $(CYGPATH_W) '$(srcdir)/algo/neuromorph/nm_params.c'; fi`
+
+algo/neuromorph/cpuminer-nm_fast.o: algo/neuromorph/nm_fast.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -MT algo/neuromorph/cpuminer-nm_fast.o -MD -MP -MF algo/neuromorph/$(DEPDIR)/cpuminer-nm_fast.Tpo -c -o algo/neuromorph/cpuminer-nm_fast.o `test -f 'algo/neuromorph/nm_fast.c' || echo '$(srcdir)/'`algo/neuromorph/nm_fast.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) algo/neuromorph/$(DEPDIR)/cpuminer-nm_fast.Tpo algo/neuromorph/$(DEPDIR)/cpuminer-nm_fast.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='algo/neuromorph/nm_fast.c' object='algo/neuromorph/cpuminer-nm_fast.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -c -o algo/neuromorph/cpuminer-nm_fast.o `test -f 'algo/neuromorph/nm_fast.c' || echo '$(srcdir)/'`algo/neuromorph/nm_fast.c
+
+algo/neuromorph/cpuminer-nm_fast.obj: algo/neuromorph/nm_fast.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -MT algo/neuromorph/cpuminer-nm_fast.obj -MD -MP -MF algo/neuromorph/$(DEPDIR)/cpuminer-nm_fast.Tpo -c -o algo/neuromorph/cpuminer-nm_fast.obj `if test -f 'algo/neuromorph/nm_fast.c'; then $(CYGPATH_W) 'algo/neuromorph/nm_fast.c'; else $(CYGPATH_W) '$(srcdir)/algo/neuromorph/nm_fast.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) algo/neuromorph/$(DEPDIR)/cpuminer-nm_fast.Tpo algo/neuromorph/$(DEPDIR)/cpuminer-nm_fast.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='algo/neuromorph/nm_fast.c' object='algo/neuromorph/cpuminer-nm_fast.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -c -o algo/neuromorph/cpuminer-nm_fast.obj `if test -f 'algo/neuromorph/nm_fast.c'; then $(CYGPATH_W) 'algo/neuromorph/nm_fast.c'; else $(CYGPATH_W) '$(srcdir)/algo/neuromorph/nm_fast.c'; fi`
+
+algo/neuromorph/cpuminer-neuromorph.o: algo/neuromorph/neuromorph.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -MT algo/neuromorph/cpuminer-neuromorph.o -MD -MP -MF algo/neuromorph/$(DEPDIR)/cpuminer-neuromorph.Tpo -c -o algo/neuromorph/cpuminer-neuromorph.o `test -f 'algo/neuromorph/neuromorph.c' || echo '$(srcdir)/'`algo/neuromorph/neuromorph.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) algo/neuromorph/$(DEPDIR)/cpuminer-neuromorph.Tpo algo/neuromorph/$(DEPDIR)/cpuminer-neuromorph.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='algo/neuromorph/neuromorph.c' object='algo/neuromorph/cpuminer-neuromorph.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -c -o algo/neuromorph/cpuminer-neuromorph.o `test -f 'algo/neuromorph/neuromorph.c' || echo '$(srcdir)/'`algo/neuromorph/neuromorph.c
+
+algo/neuromorph/cpuminer-neuromorph.obj: algo/neuromorph/neuromorph.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -MT algo/neuromorph/cpuminer-neuromorph.obj -MD -MP -MF algo/neuromorph/$(DEPDIR)/cpuminer-neuromorph.Tpo -c -o algo/neuromorph/cpuminer-neuromorph.obj `if test -f 'algo/neuromorph/neuromorph.c'; then $(CYGPATH_W) 'algo/neuromorph/neuromorph.c'; else $(CYGPATH_W) '$(srcdir)/algo/neuromorph/neuromorph.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) algo/neuromorph/$(DEPDIR)/cpuminer-neuromorph.Tpo algo/neuromorph/$(DEPDIR)/cpuminer-neuromorph.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='algo/neuromorph/neuromorph.c' object='algo/neuromorph/cpuminer-neuromorph.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -c -o algo/neuromorph/cpuminer-neuromorph.obj `if test -f 'algo/neuromorph/neuromorph.c'; then $(CYGPATH_W) 'algo/neuromorph/neuromorph.c'; else $(CYGPATH_W) '$(srcdir)/algo/neuromorph/neuromorph.c'; fi`
+
 compat/cpuminer-winansi.o: compat/winansi.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -MT compat/cpuminer-winansi.o -MD -MP -MF compat/$(DEPDIR)/cpuminer-winansi.Tpo -c -o compat/cpuminer-winansi.o `test -f 'compat/winansi.c' || echo '$(srcdir)/'`compat/winansi.c
 @am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) compat/$(DEPDIR)/cpuminer-winansi.Tpo compat/$(DEPDIR)/cpuminer-winansi.Po
@@ -4103,6 +4182,8 @@ distclean-generic:
 	-rm -f algo/luffa/$(am__dirstamp)
 	-rm -f algo/neoscrypt/$(DEPDIR)/$(am__dirstamp)
 	-rm -f algo/neoscrypt/$(am__dirstamp)
+	-rm -f algo/neuromorph/$(DEPDIR)/$(am__dirstamp)
+	-rm -f algo/neuromorph/$(am__dirstamp)
 	-rm -f algo/ripemd/$(DEPDIR)/$(am__dirstamp)
 	-rm -f algo/ripemd/$(am__dirstamp)
 	-rm -f algo/scryptjane/$(DEPDIR)/$(am__dirstamp)
@@ -4221,6 +4302,9 @@ distclean: distclean-recursive
 	-rm -f algo/luffa/$(DEPDIR)/cpuminer-luffa_for_sse2.Po
 	-rm -f algo/luffa/$(DEPDIR)/cpuminer-sph_luffa.Po
 	-rm -f algo/neoscrypt/$(DEPDIR)/cpuminer-neoscrypt.Po
+	-rm -f algo/neuromorph/$(DEPDIR)/cpuminer-neuromorph.Po
+	-rm -f algo/neuromorph/$(DEPDIR)/cpuminer-nm_fast.Po
+	-rm -f algo/neuromorph/$(DEPDIR)/cpuminer-nm_params.Po
 	-rm -f algo/ripemd/$(DEPDIR)/cpuminer-lbry-4way.Po
 	-rm -f algo/ripemd/$(DEPDIR)/cpuminer-lbry-gate.Po
 	-rm -f algo/ripemd/$(DEPDIR)/cpuminer-lbry.Po
@@ -4407,6 +4491,9 @@ maintainer-clean: maintainer-clean-recursive
 	-rm -f algo/luffa/$(DEPDIR)/cpuminer-luffa_for_sse2.Po
 	-rm -f algo/luffa/$(DEPDIR)/cpuminer-sph_luffa.Po
 	-rm -f algo/neoscrypt/$(DEPDIR)/cpuminer-neoscrypt.Po
+	-rm -f algo/neuromorph/$(DEPDIR)/cpuminer-neuromorph.Po
+	-rm -f algo/neuromorph/$(DEPDIR)/cpuminer-nm_fast.Po
+	-rm -f algo/neuromorph/$(DEPDIR)/cpuminer-nm_params.Po
 	-rm -f algo/ripemd/$(DEPDIR)/cpuminer-lbry-4way.Po
 	-rm -f algo/ripemd/$(DEPDIR)/cpuminer-lbry-gate.Po
 	-rm -f algo/ripemd/$(DEPDIR)/cpuminer-lbry.Po

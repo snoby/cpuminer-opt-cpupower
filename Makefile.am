@@ -144,7 +144,10 @@ cpuminer_SOURCES = \
   algo/yespower2b/yespower.c \
   algo/yescrypt/yescrypt.c \
   algo/yescrypt/sha256_Y.c \
-  algo/yescrypt/yescrypt-best.c
+  algo/yescrypt/yescrypt-best.c \
+  algo/neuromorph/nm_params.c \
+  algo/neuromorph/nm_fast.c \
+  algo/neuromorph/neuromorph.c
 
 disable_flags =
 
@@ -171,6 +174,15 @@ cpuminer_LDFLAGS	= @LDFLAGS@
 cpuminer_LDADD	= @LIBCURL@ @JANSSON_LIBS@ @PTHREAD_LIBS@ @WS2_LIBS@ -lssl -lcrypto -lgmp
 cpuminer_CPPFLAGS = @LIBCURL_CPPFLAGS@ $(ALL_INCLUDES)
 cpuminer_CFLAGS   = -Wno-pointer-sign -Wno-pointer-to-int-cast $(disable_flags)
+
+# NeuroMorph's consensus digest requires exact IEEE-754 semantics (isnan/isinf
+# checks in the VM's float path) -- these must never be built with
+# -ffast-math/-ffinite-math-only (see the caution comment atop nm_fast.c).
+# This override only wins if the global CFLAGS (e.g. from build.sh) doesn't
+# also pass -ffast-math after it; do not build this fork's -ffast-math
+# profile (build.sh) when mining neuromorph.
+algo_neuromorph_nm_fast_CFLAGS = $(cpuminer_CFLAGS) -fno-fast-math -fno-finite-math-only
+algo_neuromorph_neuromorph_CFLAGS = $(cpuminer_CFLAGS) -fno-fast-math -fno-finite-math-only
 
 if HAVE_WINDOWS
 cpuminer_CFLAGS += -Wl,--stack,10485760

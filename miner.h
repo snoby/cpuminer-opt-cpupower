@@ -439,6 +439,13 @@ extern char *rpc2_job_id;
 extern char *rpc_user;
 extern char *short_url;
 
+/* NeuroMorph (Cereblix CRB) job extensions to the jsonrpc_2 dialect: a
+ * full 32-byte target (vs cryptonight's 4-byte compact target) and a
+ * per-epoch seed_hash. See rpc2_job_decode() in util.c. */
+extern uint32_t rpc2_target32[8];
+extern uint8_t g_nm_seed_hash[32];
+void nm_get_job_seed_hash( uint8_t out[32] );
+
 json_t *json_rpc2_call(CURL *curl, const char *url, const char *userpass, const char *rpc_req, int *curl_err, int flags);
 bool rpc2_login(CURL *curl);
 bool rpc2_login_decode(const json_t *val);
@@ -578,6 +585,7 @@ enum algos {
 	ALGO_YESPOWERLITB,
 	ALGO_YESPOWERINTER,
 	ALGO_POWER2B,
+        ALGO_NEUROMORPH,
         ALGO_ZR5,
         ALGO_COUNT
 };
@@ -666,6 +674,7 @@ static const char* const algo_names[] = {
   "yespowerlitb",
   "yespowerinter",
   "power2b",
+        "neuromorph",
         "zr5",
         "\0"
 };

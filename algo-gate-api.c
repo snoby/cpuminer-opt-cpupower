@@ -222,8 +222,9 @@ bool register_algo_gate( int algo, algo_gate_t *gate )
 	 case ALGO_YESPOWERSUGAR:  register_yespowersugar_algo  ( gate ); break;       
      case ALGO_YESPOWERLITB:  register_yespowerlitb_algo  ( gate ); break;              
 	 case ALGO_YESPOWERINTER:  register_yespowerinter_algo  ( gate ); break;              
-	 case ALGO_POWER2B: 	 register_power2b_algo		  ( gate ); break;              
+	 case ALGO_POWER2B: 	 register_power2b_algo		  ( gate ); break;
      case ALGO_YESPOWER:     register_yespower_algo     ( gate ); break;
+     case ALGO_NEUROMORPH:   register_neuromorph_algo   ( gate ); break;
     default:
         applog(LOG_ERR,"FAIL: algo_gate registration failed, unknown algo %s.\n", algo_names[opt_algo] );
         return false;
@@ -289,6 +290,7 @@ const char* const algo_alias_map[][2] =
   { "blake256r8vnl",     "vanilla"      },
   { "blake256r14",       "blake"        },
   { "blake256r14dcr",    "decred"       },
+  { "crb",               "neuromorph"   },
   { "cryptonote",        "cryptonight"  },
   { "cryptonight-light", "cryptolight"  },
   { "diamond",           "dmd-gr"       },
