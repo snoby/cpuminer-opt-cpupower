@@ -104,11 +104,11 @@ void civiclight_set_target(struct work *work, double diff)
 	 * found -> fewer stale submissions at ultra-low pool diff.  Previously this
 	 * ignored opt_diff_factor, so -m had no effect. */
 	double effective_diff = diff / opt_diff_factor;
-	/* Pool (BitcoinConstants.Diff1 = 2^224) accepts iff hash <= Diff1*65536/diff.
-	 * Diff1*65536 = 2^240, so target = 2^240/diff and the most-significant
-	 * limb t[7] = target>>224 = 65536/diff.  (The old 1.0/diff was 65536x
-	 * too strict and mismatched the pool's actual threshold.) */
-	unsigned long long one_over = (unsigned long long)(65536.0 / effective_diff);
+	/* Pool (BitcoinConstants.Diff1 = 2^224) accepts iff hash <= Diff1/diff,
+	 * so the most-significant limb t[7] = 1/diff.  Verified against live pool
+	 * rejections (a 1.938e-05 share has t[7]~51600 > 25000 and is
+	 * rejected at 4e-05, confirming t[7]=1/diff, NOT 65536/diff). */
+	unsigned long long one_over = (unsigned long long)(1.0 / effective_diff);
 
 	t[0] = 0xFFFFFFFFU;
 	t[1] = 0xFFFFFFFFU;
