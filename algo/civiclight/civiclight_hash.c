@@ -86,6 +86,31 @@ int64_t civiclight_get_max64()
 	return 0xfffLL;
 }
 
+/*
+ * CivicNet's custom share-difficulty convention (official CivicLight miner
+ * diff_to_hash): the share target is the 256-bit value
+ *     T = (1/diff) * 2^224 + (2^128 - 1)
+ * i.e. low  128 bits (target[0..3]) all 0xFF, and (1/diff) in the
+ * upper portion.  fulltest() compares uint32 target[8] with target[7] as the
+ * MOST-significant limb.  (1/diff)*2^224 puts (1/diff) at bit 224, so
+ * target[7] = (uint32)(1/diff), target[6..4] = 0, target[3..0] = 0xFF.
+ */
+void civiclight_set_target(struct work *work, double diff)
+{
+	uint32_t *t = (uint32_t *)work->target;
+	unsigned long long one_over = (unsigned long long)(1.0 / diff);
+
+	t[0] = 0xFFFFFFFFU;
+	t[1] = 0xFFFFFFFFU;
+	t[2] = 0xFFFFFFFFU;
+	t[3] = 0xFFFFFFFFU;
+	t[4] = 0;
+	t[5] = 0;
+	t[6] = 0;
+	t[7] = (uint32_t)one_over;
+	work->targetdiff = diff;
+}
+
 int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
                       uint64_t *hashes_done)
 {
@@ -125,6 +150,6 @@ bool register_civiclight_algo(algo_gate_t *gate)
 	gate->get_max64     = (void*)&civiclight_get_max64;
 	gate->scanhash      = (void*)&scanhash_civiclight;
 	gate->hash          = (void*)&civiclight_gate_hash;
-	gate->set_target    = (void*)&std_set_target;
+	gate->set_target    = (void*)&civiclight_set_target;
 	return true;
 }
