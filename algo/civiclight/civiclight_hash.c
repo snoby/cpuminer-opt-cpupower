@@ -63,7 +63,9 @@ int civiclight_powhash80(const void *header80, void *output)
 {
 	uint8_t raw_hash[32];
 
-	/* outer layer: SHA256d(header80) */
+	/* Outer layer: SHA256d(header80).  Matches CivicNet's CHashWriter::GetHash()
+	 * and the official CivicLight miner: sha256d(header80) fed directly to
+	 * civiclight_hash_v2.  No word byte-swap (the official miner does not swap). */
 	sha256d(raw_hash, (const unsigned char *)header80, 80);
 
 	return civiclight_hash_v2(raw_hash, 32, output);
