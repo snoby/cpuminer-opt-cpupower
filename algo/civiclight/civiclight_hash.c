@@ -98,7 +98,12 @@ int64_t civiclight_get_max64()
 void civiclight_set_target(struct work *work, double diff)
 {
 	uint32_t *t = (uint32_t *)work->target;
-	unsigned long long one_over = (unsigned long long)(1.0 / diff);
+	/* Honor --diff-multiplier (-m): opt_diff_factor divides the effective
+	 * difficulty, tightening the share target so fewer (fresher) shares are
+	 * found -> fewer stale submissions at ultra-low pool diff.  Previously this
+	 * ignored opt_diff_factor, so -m had no effect. */
+	double effective_diff = diff / opt_diff_factor;
+	unsigned long long one_over = (unsigned long long)(1.0 / effective_diff);
 
 	t[0] = 0xFFFFFFFFU;
 	t[1] = 0xFFFFFFFFU;
@@ -108,7 +113,7 @@ void civiclight_set_target(struct work *work, double diff)
 	t[5] = 0;
 	t[6] = 0;
 	t[7] = (uint32_t)one_over;
-	work->targetdiff = diff;
+	work->targetdiff = effective_diff;
 }
 
 int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
