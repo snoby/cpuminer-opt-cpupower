@@ -469,10 +469,12 @@ int yespower(yespower_local_t *local,
 	uint32_t sha256[8];
 
 	/* Sanity-check parameters */
-	if ((version != YESPOWER_0_5 && version != YESPOWER_0_9) ||
+	if ((version != YESPOWER_0_5 && version != YESPOWER_0_9 &&
+	    version != YESPOWER_1_0) ||
 	    N < 1024 || N > 512 * 1024 || r < 8 || r > 32 ||
 	    (N & (N - 1)) != 0 || r < rmin ||
 	    (!pers && perslen)) {
+		memset(dst, 0xff, sizeof(*dst));
 		errno = EINVAL;
 		return -1;
 	}

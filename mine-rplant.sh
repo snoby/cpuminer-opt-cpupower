@@ -16,4 +16,5 @@ exec "$DIR/mine-yespower.sh" \
     -a yespower \
     -o "$POOL_URL" \
     -u "$POOL_USER" \
+    --api-bind=0.0.0.0:4048 \
     "$@"

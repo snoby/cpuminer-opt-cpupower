@@ -176,6 +176,7 @@ am__cpuminer_SOURCES_DIST = cpu-miner.c util.c uint256.cpp api.c \
 	algo/whirlpool/whirlpool-4way.c algo/whirlpool/whirlpool.c \
 	algo/whirlpool/whirlpoolx.c algo/yespower/yespower.c \
 	algo/yespower/sha256-P.c algo/yespower/yespower-opt.c \
+	algo/civiclight/civiclight_hash.c \
 	algo/yespower2b/yespower-miner.c \
 	algo/yespower2b/crypto/blake2b.c algo/yespower2b/yespower.c \
 	algo/yescrypt/yescrypt.c algo/yescrypt/sha256_Y.c \
@@ -317,6 +318,7 @@ am_cpuminer_OBJECTS = cpuminer-cpu-miner.$(OBJEXT) \
 	algo/yespower/cpuminer-yespower.$(OBJEXT) \
 	algo/yespower/cpuminer-sha256-P.$(OBJEXT) \
 	algo/yespower/cpuminer-yespower-opt.$(OBJEXT) \
+	algo/civiclight/cpuminer-civiclight_hash.$(OBJEXT) \
 	algo/yespower2b/cpuminer-yespower-miner.$(OBJEXT) \
 	algo/yespower2b/crypto/cpuminer-blake2b.$(OBJEXT) \
 	algo/yespower2b/cpuminer-yespower.$(OBJEXT) \
@@ -392,6 +394,7 @@ am__depfiles_remade = ./$(DEPDIR)/cpuminer-algo-gate-api.Po \
 	algo/bmw/$(DEPDIR)/cpuminer-bmw-hash-4way.Po \
 	algo/bmw/$(DEPDIR)/cpuminer-bmw256.Po \
 	algo/bmw/$(DEPDIR)/cpuminer-sph_bmw.Po \
+	algo/civiclight/$(DEPDIR)/cpuminer-civiclight_hash.Po \
 	algo/cubehash/$(DEPDIR)/cpuminer-cube-hash-2way.Po \
 	algo/cubehash/$(DEPDIR)/cpuminer-sph_cubehash.Po \
 	algo/cubehash/sse2/$(DEPDIR)/cpuminer-cubehash_sse2.Po \
@@ -833,6 +836,7 @@ cpuminer_SOURCES = cpu-miner.c util.c uint256.cpp api.c sysinfos.c \
 	algo/whirlpool/whirlpool-4way.c algo/whirlpool/whirlpool.c \
 	algo/whirlpool/whirlpoolx.c algo/yespower/yespower.c \
 	algo/yespower/sha256-P.c algo/yespower/yespower-opt.c \
+	algo/civiclight/civiclight_hash.c \
 	algo/yespower2b/yespower-miner.c \
 	algo/yespower2b/crypto/blake2b.c algo/yespower2b/yespower.c \
 	algo/yescrypt/yescrypt.c algo/yescrypt/sha256_Y.c \
@@ -1443,6 +1447,15 @@ algo/yespower/cpuminer-sha256-P.$(OBJEXT):  \
 algo/yespower/cpuminer-yespower-opt.$(OBJEXT):  \
 	algo/yespower/$(am__dirstamp) \
 	algo/yespower/$(DEPDIR)/$(am__dirstamp)
+algo/civiclight/$(am__dirstamp):
+	@$(MKDIR_P) algo/civiclight
+	@: > algo/civiclight/$(am__dirstamp)
+algo/civiclight/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) algo/civiclight/$(DEPDIR)
+	@: > algo/civiclight/$(DEPDIR)/$(am__dirstamp)
+algo/civiclight/cpuminer-civiclight_hash.$(OBJEXT):  \
+	algo/civiclight/$(am__dirstamp) \
+	algo/civiclight/$(DEPDIR)/$(am__dirstamp)
 algo/yespower2b/$(am__dirstamp):
 	@$(MKDIR_P) algo/yespower2b
 	@: > algo/yespower2b/$(am__dirstamp)
@@ -1541,6 +1554,7 @@ mostlyclean-compile:
 	-rm -f algo/argon2/argon2d/blake2/*.$(OBJEXT)
 	-rm -f algo/blake/*.$(OBJEXT)
 	-rm -f algo/bmw/*.$(OBJEXT)
+	-rm -f algo/civiclight/*.$(OBJEXT)
 	-rm -f algo/cubehash/*.$(OBJEXT)
 	-rm -f algo/cubehash/sse2/*.$(OBJEXT)
 	-rm -f algo/echo/*.$(OBJEXT)
@@ -1623,6 +1637,7 @@ include algo/blake/$(DEPDIR)/cpuminer-sph_blake2b.Po # am--include-marker
 include algo/bmw/$(DEPDIR)/cpuminer-bmw-hash-4way.Po # am--include-marker
 include algo/bmw/$(DEPDIR)/cpuminer-bmw256.Po # am--include-marker
 include algo/bmw/$(DEPDIR)/cpuminer-sph_bmw.Po # am--include-marker
+include algo/civiclight/$(DEPDIR)/cpuminer-civiclight_hash.Po # am--include-marker
 include algo/cubehash/$(DEPDIR)/cpuminer-cube-hash-2way.Po # am--include-marker
 include algo/cubehash/$(DEPDIR)/cpuminer-sph_cubehash.Po # am--include-marker
 include algo/cubehash/sse2/$(DEPDIR)/cpuminer-cubehash_sse2.Po # am--include-marker
@@ -3577,6 +3592,20 @@ algo/yespower/cpuminer-yespower-opt.obj: algo/yespower/yespower-opt.c
 #	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) \
 #	$(AM_V_CC_no)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -c -o algo/yespower/cpuminer-yespower-opt.obj `if test -f 'algo/yespower/yespower-opt.c'; then $(CYGPATH_W) 'algo/yespower/yespower-opt.c'; else $(CYGPATH_W) '$(srcdir)/algo/yespower/yespower-opt.c'; fi`
 
+algo/civiclight/cpuminer-civiclight_hash.o: algo/civiclight/civiclight_hash.c
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -MT algo/civiclight/cpuminer-civiclight_hash.o -MD -MP -MF algo/civiclight/$(DEPDIR)/cpuminer-civiclight_hash.Tpo -c -o algo/civiclight/cpuminer-civiclight_hash.o `test -f 'algo/civiclight/civiclight_hash.c' || echo '$(srcdir)/'`algo/civiclight/civiclight_hash.c
+	$(AM_V_at)$(am__mv) algo/civiclight/$(DEPDIR)/cpuminer-civiclight_hash.Tpo algo/civiclight/$(DEPDIR)/cpuminer-civiclight_hash.Po
+#	$(AM_V_CC)source='algo/civiclight/civiclight_hash.c' object='algo/civiclight/cpuminer-civiclight_hash.o' libtool=no \
+#	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) \
+#	$(AM_V_CC_no)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -c -o algo/civiclight/cpuminer-civiclight_hash.o `test -f 'algo/civiclight/civiclight_hash.c' || echo '$(srcdir)/'`algo/civiclight/civiclight_hash.c
+
+algo/civiclight/cpuminer-civiclight_hash.obj: algo/civiclight/civiclight_hash.c
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -MT algo/civiclight/cpuminer-civiclight_hash.obj -MD -MP -MF algo/civiclight/$(DEPDIR)/cpuminer-civiclight_hash.Tpo -c -o algo/civiclight/cpuminer-civiclight_hash.obj `if test -f 'algo/civiclight/civiclight_hash.c'; then $(CYGPATH_W) 'algo/civiclight/civiclight_hash.c'; else $(CYGPATH_W) '$(srcdir)/algo/civiclight/civiclight_hash.c'; fi`
+	$(AM_V_at)$(am__mv) algo/civiclight/$(DEPDIR)/cpuminer-civiclight_hash.Tpo algo/civiclight/$(DEPDIR)/cpuminer-civiclight_hash.Po
+#	$(AM_V_CC)source='algo/civiclight/civiclight_hash.c' object='algo/civiclight/cpuminer-civiclight_hash.obj' libtool=no \
+#	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) \
+#	$(AM_V_CC_no)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -c -o algo/civiclight/cpuminer-civiclight_hash.obj `if test -f 'algo/civiclight/civiclight_hash.c'; then $(CYGPATH_W) 'algo/civiclight/civiclight_hash.c'; else $(CYGPATH_W) '$(srcdir)/algo/civiclight/civiclight_hash.c'; fi`
+
 algo/yespower2b/cpuminer-yespower-miner.o: algo/yespower2b/yespower-miner.c
 	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(cpuminer_CPPFLAGS) $(CPPFLAGS) $(cpuminer_CFLAGS) $(CFLAGS) -MT algo/yespower2b/cpuminer-yespower-miner.o -MD -MP -MF algo/yespower2b/$(DEPDIR)/cpuminer-yespower-miner.Tpo -c -o algo/yespower2b/cpuminer-yespower-miner.o `test -f 'algo/yespower2b/yespower-miner.c' || echo '$(srcdir)/'`algo/yespower2b/yespower-miner.c
 	$(AM_V_at)$(am__mv) algo/yespower2b/$(DEPDIR)/cpuminer-yespower-miner.Tpo algo/yespower2b/$(DEPDIR)/cpuminer-yespower-miner.Po
@@ -4156,6 +4185,8 @@ distclean-generic:
 	-rm -f algo/blake/$(am__dirstamp)
 	-rm -f algo/bmw/$(DEPDIR)/$(am__dirstamp)
 	-rm -f algo/bmw/$(am__dirstamp)
+	-rm -f algo/civiclight/$(DEPDIR)/$(am__dirstamp)
+	-rm -f algo/civiclight/$(am__dirstamp)
 	-rm -f algo/cubehash/$(DEPDIR)/$(am__dirstamp)
 	-rm -f algo/cubehash/$(am__dirstamp)
 	-rm -f algo/cubehash/sse2/$(DEPDIR)/$(am__dirstamp)
@@ -4275,6 +4306,7 @@ distclean: distclean-recursive
 	-rm -f algo/bmw/$(DEPDIR)/cpuminer-bmw-hash-4way.Po
 	-rm -f algo/bmw/$(DEPDIR)/cpuminer-bmw256.Po
 	-rm -f algo/bmw/$(DEPDIR)/cpuminer-sph_bmw.Po
+	-rm -f algo/civiclight/$(DEPDIR)/cpuminer-civiclight_hash.Po
 	-rm -f algo/cubehash/$(DEPDIR)/cpuminer-cube-hash-2way.Po
 	-rm -f algo/cubehash/$(DEPDIR)/cpuminer-sph_cubehash.Po
 	-rm -f algo/cubehash/sse2/$(DEPDIR)/cpuminer-cubehash_sse2.Po
@@ -4464,6 +4496,7 @@ maintainer-clean: maintainer-clean-recursive
 	-rm -f algo/bmw/$(DEPDIR)/cpuminer-bmw-hash-4way.Po
 	-rm -f algo/bmw/$(DEPDIR)/cpuminer-bmw256.Po
 	-rm -f algo/bmw/$(DEPDIR)/cpuminer-sph_bmw.Po
+	-rm -f algo/civiclight/$(DEPDIR)/cpuminer-civiclight_hash.Po
 	-rm -f algo/cubehash/$(DEPDIR)/cpuminer-cube-hash-2way.Po
 	-rm -f algo/cubehash/$(DEPDIR)/cpuminer-sph_cubehash.Po
 	-rm -f algo/cubehash/sse2/$(DEPDIR)/cpuminer-cubehash_sse2.Po

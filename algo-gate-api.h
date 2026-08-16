@@ -267,6 +267,9 @@ bool register_algo_gate( int algo, algo_gate_t *gate );
 // The register functions for all the algos can be declared here to reduce
 // compiler warnings but that's just more work for devs adding new algos.
 bool register_algo( algo_gate_t *gate );
+bool register_yespowerinter_algo( algo_gate_t* gate );
+bool register_yespower1_algo( algo_gate_t* gate );
+bool register_civiclight_algo( algo_gate_t* gate );
 
 // Overrides a common set of functions used by RPC2 and other RPC2-specific
 // init. Called by algo's register function before initializing algo-specific

@@ -30,6 +30,7 @@
 #include <openssl/sha.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <jansson.h>
 
 #include "miner.h"
 
@@ -182,6 +183,85 @@ static char *getthreads(char *params)
 }
 
 /**
+ * Returns miner global infos as JSON (for the HTTP /api/stats route)
+ */
+static char *getsummary_json(void)
+{
+	char algo[64]; *algo = '\0';
+	time_t ts = time(NULL);
+	double uptime = difftime(ts, startup);
+	double accps = (60.0 * accepted_count) / (uptime ? uptime : 1.0);
+	double diff = net_diff > 0. ? net_diff : stratum_diff;
+	double hrate = (double)global_hashrate;
+	struct cpu_info cpu = { 0 };
+#ifdef USE_MONITORING
+	cpu.has_monitoring = true;
+	cpu.cpu_temp = cpu_temp(0);
+	cpu.cpu_fan = cpu_fanpercent();
+	cpu.cpu_clock = cpu_clock(0);
+#endif
+
+	get_currentalgo(algo, sizeof(algo));
+
+	json_t *obj = json_pack(
+		"{s:s, s:s, s:s, s:s, s:i, s:s,"
+		" s:f, s:f, s:i, s:i, s:i, s:f,"
+		" s:f, s:f, s:i, s:i, s:f, s:i}",
+		"name", PACKAGE_NAME,
+		"version", PACKAGE_VERSION,
+		"api_version", APIVERSION,
+		"algo", algo,
+		"threads", opt_n_threads,
+		"url", short_url ? short_url : "",
+		"hashrate", hrate,
+		"hashrate_khs", hrate / 1000.0,
+		"accepted", (int) accepted_count,
+		"rejected", (int) rejected_count,
+		"solved", (int) solved_count,
+		"accepted_per_min", accps,
+		"diff", diff,
+		"temp", cpu.cpu_temp,
+		"fan_percent", cpu.cpu_fan,
+		"clock_mhz", cpu.cpu_clock,
+		"uptime_sec", uptime,
+		"timestamp", (int) ts
+	);
+
+	*buffer = '\0';
+	char *dump = json_dumps(obj, JSON_COMPACT);
+	if (dump) {
+		strncpy(buffer, dump, MYBUFSIZ);
+		buffer[MYBUFSIZ] = '\0';
+		free(dump);
+	}
+	json_decref(obj);
+	return buffer;
+}
+
+/**
+ * Returns per-thread hashrates as JSON (for the HTTP /api/threads route)
+ */
+static char *getthreads_json(void)
+{
+	json_t *arr = json_array();
+	for (int i = 0; i < opt_n_threads; i++) {
+		json_t *entry = json_pack("{s:i, s:f}",
+			"id", i, "hashrate", thr_hashrates[i]);
+		json_array_append_new(arr, entry);
+	}
+
+	*buffer = '\0';
+	char *dump = json_dumps(arr, JSON_COMPACT);
+	if (dump) {
+		strncpy(buffer, dump, MYBUFSIZ);
+		buffer[MYBUFSIZ] = '\0';
+		free(dump);
+	}
+	json_decref(arr);
+	return buffer;
+}
+
+/**
  * Is remote control allowed ?
  */
 static bool check_remote_access(void)
@@ -255,6 +335,28 @@ static int send_result(SOCKETTYPE c, char *result)
 		n = (int) send(c, result, (int) strlen(result) + 1, 0);
 	}
 	return n;
+}
+
+/**
+ * Sends a proper HTTP/1.1 response with a JSON body.
+ */
+static void send_http_json(SOCKETTYPE c, const char *json_body)
+{
+	char header[256];
+	size_t body_len = strlen(json_body);
+
+	snprintf(header, sizeof(header),
+		"HTTP/1.1 200 OK\r\n"
+		"Content-Type: application/json\r\n"
+		"Content-Length: %zu\r\n"
+		"Access-Control-Allow-Origin: *\r\n"
+		"Connection: close\r\n"
+		"\r\n",
+		body_len);
+
+	// ignore failure - it's closed immediately anyway
+	send(c, header, (int) strlen(header), 0);
+	send(c, json_body, (int) body_len, 0);
 }
 
 /* ---- Base64 Encoding/Decoding Table --- */
@@ -617,6 +719,9 @@ static void api()
 		return;
 	}
 
+	applog(LOG_INFO, "API listening on %s:%d (stats: http://%s:%d/api/stats)",
+		addr, port, addr, port);
+
 	buffer = (char *) calloc(1, MYBUFSIZ + 1);
 
 	counter = 0;
@@ -661,6 +766,17 @@ static void api()
 				char *msg = NULL;
 				/* Websocket requests compat. */
 				if ((msg = strstr(buf, "GET /")) && strlen(msg) > 5) {
+					char *path = msg + 4; // starts with '/'
+					if (!strncmp(path, "/api/stats", 10)) {
+						send_http_json(c, getsummary_json());
+						CLOSESOCKET(c);
+						continue;
+					}
+					if (!strncmp(path, "/api/threads", 12)) {
+						send_http_json(c, getthreads_json());
+						CLOSESOCKET(c);
+						continue;
+					}
 					char cmd[256] = { 0 };
 					sscanf(&msg[5], "%s\n", cmd);
 					params = strchr(cmd, '/');

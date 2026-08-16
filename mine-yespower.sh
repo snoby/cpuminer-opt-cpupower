@@ -28,6 +28,7 @@
 #   -t THREADS    Override thread count per instance (default: auto)
 #   -n            Dry run — print commands without executing
 #   -h            Show this help
+#   --api-bind=ADDR:PORT   Enable the JSON stats HTTP API (e.g. 0.0.0.0:4048)
 
 set -euo pipefail
 
@@ -54,6 +55,18 @@ usage() {
     grep '^#' "$0" | grep -v '^#!/' | sed 's/^# \?//'
     exit 0
 }
+
+# getopts only understands short options — pull --api-bind=ADDR:PORT out of
+# the argument list (wherever it appears) before getopts sees the rest.
+API_BIND=""
+ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --api-bind=*) API_BIND="${arg#--api-bind=}" ;;
+        *) ARGS+=("$arg") ;;
+    esac
+done
+set -- "${ARGS[@]}"
 
 while getopts "a:o:u:p:b:t:nh" opt; do
     case $opt in
@@ -369,6 +382,7 @@ VCACHE_PHYS=$(detect_vcache_phys_cpus)
         -p ${POOL_PASS} \
         -t ${THREADS} \
         --cpu-affinity=${ALL_PHYS_MASK} --cpu-priority=5"
+    [[ -n "$API_BIND" ]] && ALL_CMD="${ALL_CMD} --api-bind=${API_BIND}"
     echo "--- [All physical cores] threads=${THREADS} cpus=${ALL_PHYS_LIST} affinity=${ALL_PHYS_MASK}"
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "    DRY RUN: $ALL_CMD"
@@ -400,6 +414,7 @@ else
         -u ${POOL_USER} \
         -p ${POOL_PASS} \
         --cache-fit ${THREAD_ARG}"
+    [[ -n "$API_BIND" ]] && CMD="${CMD} --api-bind=${API_BIND}"
 
     echo "--- [cache-fit] expected threads=${TOTAL_THREADS} (miner decides)"
     if [[ "$DRY_RUN" -eq 1 ]]; then

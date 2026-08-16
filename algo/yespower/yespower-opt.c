@@ -877,10 +877,12 @@ int yespower(yespower_local_t *local,
 	uint8_t sha256[32];
 
 	/* Sanity-check parameters */
-	if ((version != YESPOWER_0_5 && version != YESPOWER_0_9) ||
+	if ((version != YESPOWER_0_5 && version != YESPOWER_0_9 &&
+	    version != YESPOWER_1_0) ||
 	    N < 1024 || N > 512 * 1024 || r < 8 || r > 32 ||
 	    (N & (N - 1)) != 0 ||
 	    (!pers && perslen)) {
+		memset(dst, 0xff, sizeof(*dst));
 		errno = EINVAL;
 		return -1;
 	}
@@ -894,7 +896,7 @@ int yespower(yespower_local_t *local,
 		ctx.Sbytes = 2 * Swidth_to_Sbytes1(Swidth);
 	} else {
 		XY_size = B_size + 64;
-		Swidth = Swidth_0_9;
+		Swidth = Swidth_0_9; /* 1.0 shares the 0.9/1.0 optimized pass */
 		ctx.Sbytes = 3 * Swidth_to_Sbytes1(Swidth);
 	}
 	need = B_size + V_size + XY_size + ctx.Sbytes;

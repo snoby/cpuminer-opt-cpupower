@@ -71,8 +71,13 @@ void yespower_hash( const char *input, char *output, uint32_t len )
    if (verstring==7)
    {
 				static const yespower_params_t v7 = {YESPOWER_0_9, 2048, 32, "Satoshi Nakamoto 31/Oct/2008 Proof-of-work is essentially one-CPU-one-vote", 74};
-				yespower_tls( (yespower_binary_t*)input, len, &v7, (yespower_binary_t*)output );
-	}
+				yespower_tls((const uint8_t*)input, len, &v7, (yespower_binary_t*)output);
+   }
+   if (verstring==8)
+   {
+				static const yespower_params_t v8 = {YESPOWER_1_0, 2048, 8, NULL, 0};
+				yespower_tls((const uint8_t*)input, len, &v8, (yespower_binary_t*)output);
+   }
 }
 
 int scanhash_yespower( int thr_id, struct work *work, uint32_t max_nonce,
@@ -187,5 +192,16 @@ bool register_yespowersugar_algo( algo_gate_t* gate )
   gate->hash          = (void*)&yespower_hash;
   gate->set_target    = (void*)&scrypt_set_target;
   verstring=7;
+  return true;
+};
+
+bool register_yespower1_algo( algo_gate_t* gate )
+{
+  gate->optimizations = SSE2_OPT | SHA_OPT;
+  gate->get_max64     = (void*)&yespower_get_max64;
+  gate->scanhash      = (void*)&scanhash_yespower;
+  gate->hash          = (void*)&yespower_hash;
+  gate->set_target    = (void*)&std_set_target;
+  verstring=8;
   return true;
 };

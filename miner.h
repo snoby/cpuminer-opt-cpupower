@@ -584,6 +584,8 @@ enum algos {
 		ALGO_YESPOWERSUGAR,
 	ALGO_YESPOWERLITB,
 	ALGO_YESPOWERINTER,
+	ALGO_YESPOWER1,
+	ALGO_CIVICLIGHT,
 	ALGO_POWER2B,
         ALGO_NEUROMORPH,
         ALGO_ZR5,
@@ -673,6 +675,8 @@ static const char* const algo_names[] = {
   "yespowersugar",  
   "yespowerlitb",
   "yespowerinter",
+  "yespower1",
+  "civiclight",
   "power2b",
         "neuromorph",
         "zr5",
@@ -817,6 +821,8 @@ Options:\n\
 						  yespowersugar   Sugarchain (SUGAR)\n\
                           yespowerlitb  LightBit (LITB)\n\
 						  yespowerinter  Intercoin (ITC)\n\
+						  yespower1     Openwall yespower 1.0 (N=2048,r=8,no pers)\n\
+						  civiclight    CivicNet (CIVIC) v2\n\
 						  power2b  MicroBitcoin (MBC)\n\
                           yescryptr32   WAVI\n\
                           zr5           Ziftr\n\

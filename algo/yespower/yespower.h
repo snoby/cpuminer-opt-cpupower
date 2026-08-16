@@ -50,7 +50,7 @@ typedef yespower_region_t yespower_local_t;
 /*
  * Type for yespower algorithm version numbers.
  */
-typedef enum { YESPOWER_0_5 = 5, YESPOWER_0_9 = 9 } yespower_version_t;
+typedef enum { YESPOWER_0_5 = 5, YESPOWER_0_9 = 9, YESPOWER_1_0 = 10 } yespower_version_t;
 
 /**
  * yespower parameters combined into one struct.
