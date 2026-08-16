@@ -42,9 +42,10 @@ int civiclight_hash_v2(const void *input, size_t len, void *output)
 	/* hash1 = SHA256(input) */
 	SHA256_Buf(input, len, hash1);
 
-	/* yp = yespower-1.0(hash1, 32) */
+	/* yp = yespower-1.0(hash1, 32).
+	 * Optimized core returns 1 on success, -1 on error (0 = restart abort). */
 	if (yespower(&civiclight_yp_local, hash1, 32,
-	    &civiclight_yp_params, &yp_out)) {
+	    &civiclight_yp_params, &yp_out, 0) <= 0) {
 		memset(output, 0xff, 32);
 		return -1;
 	}
@@ -103,7 +104,11 @@ void civiclight_set_target(struct work *work, double diff)
 	 * found -> fewer stale submissions at ultra-low pool diff.  Previously this
 	 * ignored opt_diff_factor, so -m had no effect. */
 	double effective_diff = diff / opt_diff_factor;
-	unsigned long long one_over = (unsigned long long)(1.0 / effective_diff);
+	/* Pool (BitcoinConstants.Diff1 = 2^224) accepts iff hash <= Diff1*65536/diff.
+	 * Diff1*65536 = 2^240, so target = 2^240/diff and the most-significant
+	 * limb t[7] = target>>224 = 65536/diff.  (The old 1.0/diff was 65536x
+	 * too strict and mismatched the pool's actual threshold.) */
+	unsigned long long one_over = (unsigned long long)(65536.0 / effective_diff);
 
 	t[0] = 0xFFFFFFFFU;
 	t[1] = 0xFFFFFFFFU;
