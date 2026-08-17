@@ -136,18 +136,20 @@ int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
 	uint32_t n = pdata[19];
 	const uint32_t first_nonce = n;
 
-	/* serialize header words 0..18 once per work item (little-endian) */
+	/* serialize header words 0..18 once per work item (little-endian), matching
+	 * Soj's v128_bswap32_80.  Nonce: Soj writes edata[19]=n (LE, no swap)
+	 * and submits pdata[19]=bswap_32(n).  We mirror that exactly. */
 	for (int k = 0; k < 19; k++)
 		be32enc(&endiandata[k], pdata[k]);
 
 	do {
-		be32enc(&endiandata[19], n);
+		endiandata[19] = n;
 		if (civiclight_powhash80(endiandata, vhash))
 			break;
 		if (vhash[7] < Htarg && fulltest(vhash, ptarget)) {
 			work_set_target_ratio(work, vhash);
 			*hashes_done = n - first_nonce + 1;
-			pdata[19] = n;
+			pdata[19] = bswap_32(n);
 			return true;
 		}
 		n++;
