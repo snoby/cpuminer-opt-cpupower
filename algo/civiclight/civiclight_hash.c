@@ -149,8 +149,19 @@ int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
 			break;
 		if (vhash[7] < Htarg && fulltest(vhash, ptarget)) {
 			work_set_target_ratio(work, vhash);
-			/* DEBUG: dump submitted nonce + vhash */
-			fprintf(stderr, "CIVSHARE nonce_word=0x%08x vhash=", n);
+			/* DEBUG: dump the EXACT 80-byte header buffer passed to
+			 * civiclight_powhash80 (endiandata[0..19] as bytes), + vhash.
+			 * Hash these exact bytes against the reference to test whether
+			 * the print path == the hash-input path (possibility #1). */
+			fprintf(stderr, "CIVSHARE header80=");
+			for (int k = 0; k < 20; k++) {
+				unsigned char b0 = (unsigned char)(endiandata[k]);
+				unsigned char b1 = (unsigned char)(endiandata[k]>>8);
+				unsigned char b2 = (unsigned char)(endiandata[k]>>16);
+				unsigned char b3 = (unsigned char)(endiandata[k]>>24);
+				fprintf(stderr, "%02x%02x%02x%02x", b0, b1, b2, b3);
+			}
+			fprintf(stderr, " vhash=");
 			for (int k = 0; k < 32; k++)
 				fprintf(stderr, "%02x", ((unsigned char*)vhash)[k]);
 			fprintf(stderr, " v7=0x%08x\n", vhash[7]);
