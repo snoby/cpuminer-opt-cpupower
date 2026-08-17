@@ -72,19 +72,12 @@ int civiclight_hash_v2(const void *input, size_t len, void *output)
 
 int civiclight_powhash80(const void *header80, void *output)
 {
-	/* Match the official Soj-CivicLight miner (algo/civiclight/civiclight.c):
-	 *   intermediate = sha256d(header80)          = SHA256(SHA256(header80))
-	 *   then civiclight_core_v2(intermediate, 32):
-	 *     hash1 = SHA256(intermediate, 32)
-	 *     yp    = yespower(hash1, 32, {YESPOWER_1_0, N=2048, r=8, pers=NULL})
-	 *     out   = SHA256(yp XOR hash1)
-	 * civiclight_hash_v2 does the inner SHA256(intermediate,32)+yespower+XOR+SHA256. */
-	uint8_t intermediate[32];
-	sha256d(intermediate, (const unsigned char *)header80, 80);
-	fprintf(stderr, "CIVSTAGE sha256d(header80)=");
-	for (int i = 0; i < 32; i++) fprintf(stderr, "%02x", intermediate[i]);
-	fprintf(stderr, "\n");
-	return civiclight_hash_v2(intermediate, 32, output);
+	/* CivicNet civiclight v2 (verified against official CivicNet reference):
+	 *   hash1 = SHA256(header80)                    (SINGLE SHA256)
+	 *   yp    = yespower(hash1, 32, {YESPOWER_1_0, N=2048, r=8, pers=NULL})
+	 *   out   = SHA256(yp XOR hash1)
+	 * civiclight_hash_v2 does exactly this.  NO sha256d pre-hash. */
+	return civiclight_hash_v2(header80, 80, output);
 }
 
 void civiclight_gate_hash(void *output, const void *input, uint32_t len)
