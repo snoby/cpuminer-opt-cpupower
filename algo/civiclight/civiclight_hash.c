@@ -148,6 +148,12 @@ int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
 			break;
 		if (vhash[7] < Htarg && fulltest(vhash, ptarget)) {
 			work_set_target_ratio(work, vhash);
+			/* DEBUG: dump submitted nonce (as pool receives it: be32enc(bswap_32(n))=n)
+			 * and the miner's vhash, to diff against the pool's reconstruction. */
+			fprintf(stderr, "CIVSHARE nonce_word=0x%08x submit_be32=0x%08x vhash=", n, bswap_32(n));
+			for (int k = 0; k < 32; k++)
+				fprintf(stderr, "%02x", ((unsigned char*)vhash)[k]);
+			fprintf(stderr, " v7=0x%08x\n", vhash[7]);
 			*hashes_done = n - first_nonce + 1;
 			pdata[19] = bswap_32(n);
 			return true;
