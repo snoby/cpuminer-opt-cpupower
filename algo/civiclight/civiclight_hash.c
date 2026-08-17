@@ -41,21 +41,31 @@ int civiclight_hash_v2(const void *input, size_t len, void *output)
 
 	/* hash1 = SHA256(input) */
 	SHA256_Buf(input, len, hash1);
+	fprintf(stderr, "CIVSTAGE hash1=SHA256(input,%d)=", (int)len);
+	for (int i = 0; i < 32; i++) fprintf(stderr, "%02x", hash1[i]);
 
 	/* yp = yespower-1.0(hash1, 32).
 	 * Optimized core returns 1 on success, -1 on error (0 = restart abort). */
 	if (yespower(&civiclight_yp_local, hash1, 32,
 	    &civiclight_yp_params, &yp_out, 0) <= 0) {
 		memset(output, 0xff, 32);
+		fprintf(stderr, "\n");
 		return -1;
 	}
+	fprintf(stderr, " yp=yespower(hash1,32)=");
+	for (int i = 0; i < 32; i++) fprintf(stderr, "%02x", yp_out.uc[i]);
 
 	/* xor_buf = yp_out XOR hash1 */
 	for (int i = 0; i < 32; i++)
 		xor_buf[i] = yp_out.uc[i] ^ hash1[i];
+	fprintf(stderr, " xor=");
+	for (int i = 0; i < 32; i++) fprintf(stderr, "%02x", xor_buf[i]);
 
 	/* output = SHA256(xor_buf) */
 	SHA256_Buf(xor_buf, 32, (uint8_t *)output);
+	fprintf(stderr, " final=SHA256(xor)=");
+	for (int i = 0; i < 32; i++) fprintf(stderr, "%02x", ((uint8_t*)output)[i]);
+	fprintf(stderr, "\n");
 
 	return 0;
 }
@@ -71,6 +81,9 @@ int civiclight_powhash80(const void *header80, void *output)
 	 * civiclight_hash_v2 does the inner SHA256(intermediate,32)+yespower+XOR+SHA256. */
 	uint8_t intermediate[32];
 	sha256d(intermediate, (const unsigned char *)header80, 80);
+	fprintf(stderr, "CIVSTAGE sha256d(header80)=");
+	for (int i = 0; i < 32; i++) fprintf(stderr, "%02x", intermediate[i]);
+	fprintf(stderr, "\n");
 	return civiclight_hash_v2(intermediate, 32, output);
 }
 
