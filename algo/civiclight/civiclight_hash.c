@@ -23,6 +23,11 @@
 static __thread yespower_local_t civiclight_yp_local;
 static __thread int civiclight_yp_initialized = 0;
 
+/* Pool-specific Diff1 exponent for civiclight share difficulty.
+ * civicnet: 224 (shareDiff=(2^224/hash)*65536 -> t[7]=1/diff).  Other pools
+ * (e.g. nitro) may use a different base; set via --civic-diff1. */
+int opt_civic_diff1_shift = 224;
+
 static const yespower_params_t civiclight_yp_params = {
     YESPOWER_1_0, 2048, 8, NULL, 0
 };
@@ -107,8 +112,15 @@ void civiclight_set_target(struct work *work, double diff)
 	/* Pool (BitcoinConstants.Diff1 = 2^224) accepts iff hash <= Diff1/diff,
 	 * so the most-significant limb t[7] = 1/diff.  Verified against live pool
 	 * rejections (a 1.938e-05 share has t[7]~51600 > 25000 and is
-	 * rejected at 4e-05, confirming t[7]=1/diff, NOT 65536/diff). */
-	unsigned long long one_over = (unsigned long long)(1.0 / effective_diff);
+	 * rejected at 4e-05, confirming t[7]=1/diff, NOT 65536/diff).
+	 *
+	 * Pool-specific: the Diff1 base varies by pool.  civicnet uses
+	 * shareDiff=(2^224/hash)*65536  ->  t[7]=1/diff.  Other pools (e.g.
+	 * nitro) may use a different Diff1 (e.g. 2^256 -> t[7]=2^32/diff).
+	 * opt_civic_diff1_shift selects the Diff1 exponent; 224 is the civicnet
+	 * default.  For a 2^256-based pool set it to 256 (t[7]=2^(shift-224)/diff). */
+	unsigned long long one_over =
+	    (unsigned long long)((double)(1ULL << (opt_civic_diff1_shift - 224)) / effective_diff);
 
 	t[0] = 0xFFFFFFFFU;
 	t[1] = 0xFFFFFFFFU;

@@ -106,6 +106,7 @@ int opt_scrypt_n = 0;
 int opt_pluck_n = 128;
 int opt_n_threads = 0;
 int opt_cache_fit = 0;   /* --cache-fit working-set MB per thread; 0 = off */
+int opt_yp_way = 0;      /* --yp-way: 1 (default) or 2 nonce lanes per thread */
 #if ( __GNUC__ > 4 ) || ( ( __GNUC__ == 4 ) && ( __GNUC_MINOR__ >= 8 ) )
 __int128_t opt_affinity = -1LL;
 #else
@@ -3353,6 +3354,16 @@ void parse_arg(int key, char *arg )
 		break;
 	case 1024:
 		opt_randomize = true;
+		break;
+	case 1070: // yp-way
+		opt_yp_way = atoi(arg);
+		if (opt_yp_way < 1 || opt_yp_way > 2)
+			opt_yp_way = 1;
+		break;
+	case 1071: // civic-diff1 (Diff1 exponent for civiclight share target)
+		opt_civic_diff1_shift = atoi(arg);
+		if (opt_civic_diff1_shift < 224 || opt_civic_diff1_shift > 256)
+			opt_civic_diff1_shift = 224;
 		break;
 	case 'V':
 		show_version_and_exit();
