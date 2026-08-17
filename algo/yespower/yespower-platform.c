@@ -46,6 +46,13 @@ static void *alloc_region(yespower_region_t *region, size_t size)
 	const size_t hugepage_mask = (size_t)HUGEPAGE_SIZE - 1;
 	if (size >= HUGEPAGE_THRESHOLD && size + hugepage_mask >= size) {
 		flags |= MAP_HUGETLB;
+#ifdef MAP_HUGE_2MB
+		/* Explicitly request 2MB hugepages.  On systems with multiple hugepage
+		 * sizes (2MB + 1GB), plain MAP_HUGETLB may default to the 1GB pool
+		 * which may have 0 free -> errno=12.  MAP_HUGE_2MB (0x40000) pins
+		 * the 2MB pool. */
+		flags |= MAP_HUGE_2MB;
+#endif
 /*
  * Linux's munmap() fails on MAP_HUGETLB mappings if size is not a multiple of
  * huge page size, so let's round up to huge page size here.
