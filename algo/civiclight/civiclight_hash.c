@@ -23,10 +23,10 @@
 static __thread yespower_local_t civiclight_yp_local;
 static __thread int civiclight_yp_initialized = 0;
 
-/* Pool-specific Diff1 exponent for civiclight share difficulty.
- * Default 256 (nitro convention: t[7]=2^32/diff, Diff1=2^256).
- * civicnet/viporlab uses 224 (t[7]=1/diff).  Set via --civic-diff1. */
-int opt_civic_diff1_shift = 256;
+/* Diff1 exponent for civiclight share difficulty.  Default 224 (vipor/civicnet
+ * convention: t[7]=1/diff).  --diff-lose relaxes to 256 (nitropool:
+ * t[7]=2^32/diff). */
+int opt_civic_diff1_shift = 224;
 
 static const yespower_params_t civiclight_yp_params = {
     YESPOWER_1_0, 2048, 8, NULL, 0

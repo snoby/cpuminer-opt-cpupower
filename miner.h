@@ -941,7 +941,7 @@ static struct option const options[] = {
         { "user", 1, NULL, 'u' },
         { "userpass", 1, NULL, 'O' },
         { "yp-way", 1, NULL, 1070 },
-        { "civic-diff1", 1, NULL, 1071 },
+        { "diff-lose", 0, NULL, 1071 },
         { "version", 0, NULL, 'V' },
         { 0, 0, 0, 0 }
 };
