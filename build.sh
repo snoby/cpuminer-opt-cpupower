@@ -4,10 +4,12 @@
 # ./build.sh --quick  single-phase build, reuses existing profile if present
 #
 # Falls back automatically: no clang -> gcc; no llvm-profdata -> plain build.
-# Binary is -march=native: always rebuild on the machine that will mine.
+# Binary is -march=znver2 (AMD Rome/Zen2): runs on Rome/Milan/Genoa.
 set -e
 
-BASE_CFLAGS="-O3 -march=native -pthread -funroll-loops -ffast-math -fomit-frame-pointer -falign-functions=32 -falign-loops=32 -fvectorize -fslp-vectorize"
+# -march=znver2 targets AMD Rome (Zen2, e.g. EPYC 7742) and runs on any Zen2/+
+# (Rome/Milan/Genoa). Portable across the fleet; NOT native-specific.
+BASE_CFLAGS="-O3 -march=znver2 -pthread -funroll-loops -ffast-math -fomit-frame-pointer -falign-functions=32 -falign-loops=32 -fvectorize -fslp-vectorize"
 PGO_DIR="$(pwd)/pgo-profile"
 PROFDATA="$PGO_DIR/merged.profdata"
 
@@ -22,7 +24,7 @@ else
         fi
     done
     # gcc doesn't know clang's vectorize flags
-    BASE_CFLAGS="-O3 -march=native -pthread -funroll-loops -ffast-math -fomit-frame-pointer -ftree-vectorize"
+    BASE_CFLAGS="-O3 -march=znver2 -pthread -funroll-loops -ffast-math -fomit-frame-pointer -ftree-vectorize"
 fi
 echo "=== Compiler: $CC ($($CC --version | head -1)) ==="
 
