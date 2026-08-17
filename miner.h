@@ -726,7 +726,6 @@ extern double net_hashrate;
 extern int opt_pluck_n;
 extern int opt_scrypt_n;
 extern int opt_yp_way;
-extern int opt_civic_diff1_shift;
 extern double opt_diff_factor;
 extern bool opt_randomize;
 extern bool allow_mininginfo;
@@ -941,7 +940,6 @@ static struct option const options[] = {
         { "user", 1, NULL, 'u' },
         { "userpass", 1, NULL, 'O' },
         { "yp-way", 1, NULL, 1070 },
-        { "diff-lose", 0, NULL, 1071 },
         { "version", 0, NULL, 'V' },
         { 0, 0, 0, 0 }
 };

@@ -23,11 +23,6 @@
 static __thread yespower_local_t civiclight_yp_local;
 static __thread int civiclight_yp_initialized = 0;
 
-/* Diff1 exponent for civiclight share difficulty.  Default 224 (vipor/civicnet
- * convention: t[7]=1/diff).  --diff-lose relaxes to 256 (nitropool:
- * t[7]=2^32/diff). */
-int opt_civic_diff1_shift = 224;
-
 static const yespower_params_t civiclight_yp_params = {
     YESPOWER_1_0, 2048, 8, NULL, 0
 };
@@ -110,12 +105,9 @@ void civiclight_set_target(struct work *work, double diff)
 	 * ignored opt_diff_factor, so -m had no effect. */
 	double effective_diff = diff / opt_diff_factor;
 	/* Pool (BitcoinConstants.Diff1 = 2^224) accepts iff hash <= Diff1/diff,
-	 * so the most-significant limb t[7] = targ[1]/2^96 = 2^32/diff for nitro
-	 * (Diff1=2^256, the default).  civicnet/viporlab uses Diff1=2^224 ->
-	 * t[7]=1/diff; use --civic-diff1 224 for it.  opt_civic_diff1_shift
-	 * selects the exponent. */
-	unsigned long long one_over =
-	    (unsigned long long)((double)(1ULL << (opt_civic_diff1_shift - 224)) / effective_diff);
+	 * so the most-significant limb t[7] = 1/diff.  Matches the official
+	 * CivicNet/Soj miner (diff_to_hash: targ[1]=(1/diff)*2^96 -> t[7]=1/diff). */
+	unsigned long long one_over = (unsigned long long)(1.0 / effective_diff);
 
 	t[0] = 0xFFFFFFFFU;
 	t[1] = 0xFFFFFFFFU;

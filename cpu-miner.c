@@ -3360,9 +3360,6 @@ void parse_arg(int key, char *arg )
 		if (opt_yp_way < 1 || opt_yp_way > 2)
 			opt_yp_way = 1;
 		break;
-	case 1071: // diff-lose: relax civiclight share target to nitropool convention (2^256)
-		opt_civic_diff1_shift = 256;
-		break;
 	case 'V':
 		show_version_and_exit();
 	case 'h':
