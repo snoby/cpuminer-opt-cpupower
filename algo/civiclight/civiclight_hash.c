@@ -142,25 +142,6 @@ int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
 			break;
 		if (vhash[7] < Htarg && fulltest(vhash, ptarget)) {
 			work_set_target_ratio(work, vhash);
-			/* DEBUG instrumentation: emit the exact 80-byte serialized header
-			 * (as hashed) + resulting vhash, so we can diff byte-for-byte
-			 * against the pool's reconstruction of the same header+nonce. */
-			{
-				unsigned char dbg[80];
-				for (int k = 0; k < 20; k++) {
-					dbg[k*4+0] = (unsigned char)(endiandata[k]);
-					dbg[k*4+1] = (unsigned char)(endiandata[k]>>8);
-					dbg[k*4+2] = (unsigned char)(endiandata[k]>>16);
-					dbg[k*4+3] = (unsigned char)(endiandata[k]>>24);
-				}
-				fprintf(stderr, "CIVDBG submit nonce=0x%08x header80=", n);
-				for (int k = 0; k < 80; k++)
-					fprintf(stderr, "%02x", dbg[k]);
-				fprintf(stderr, " vhash=");
-				for (int k = 0; k < 32; k++)
-					fprintf(stderr, "%02x", ((unsigned char*)vhash)[k]);
-				fprintf(stderr, " v7=0x%08x\n", vhash[7]);
-			}
 			*hashes_done = n - first_nonce + 1;
 			pdata[19] = n;
 			return true;
