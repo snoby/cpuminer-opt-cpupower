@@ -137,25 +137,25 @@ int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
 	const uint32_t first_nonce = n;
 
 	/* serialize header words 0..18 once per work item (little-endian), matching
-	 * Soj's v128_bswap32_80.  Nonce: Soj writes edata[19]=n (LE, no swap)
-	 * and submits pdata[19]=bswap_32(n).  We mirror that exactly. */
+	 * Soj's v128_bswap32_80.  Nonce: vipor pool accepts when hashing
+	 * be32enc(endiandata[19], n) and submitting n raw (this had more accepts
+	 * on vipor than Soj's LE+bswap convention). */
 	for (int k = 0; k < 19; k++)
 		be32enc(&endiandata[k], pdata[k]);
 
 	do {
-		endiandata[19] = n;
+		be32enc(&endiandata[19], n);
 		if (civiclight_powhash80(endiandata, vhash))
 			break;
 		if (vhash[7] < Htarg && fulltest(vhash, ptarget)) {
 			work_set_target_ratio(work, vhash);
-			/* DEBUG: dump submitted nonce (as pool receives it: be32enc(bswap_32(n))=n)
-			 * and the miner's vhash, to diff against the pool's reconstruction. */
-			fprintf(stderr, "CIVSHARE nonce_word=0x%08x submit_be32=0x%08x vhash=", n, bswap_32(n));
+			/* DEBUG: dump submitted nonce + vhash */
+			fprintf(stderr, "CIVSHARE nonce_word=0x%08x vhash=", n);
 			for (int k = 0; k < 32; k++)
 				fprintf(stderr, "%02x", ((unsigned char*)vhash)[k]);
 			fprintf(stderr, " v7=0x%08x\n", vhash[7]);
 			*hashes_done = n - first_nonce + 1;
-			pdata[19] = bswap_32(n);
+			pdata[19] = n;
 			return true;
 		}
 		n++;
