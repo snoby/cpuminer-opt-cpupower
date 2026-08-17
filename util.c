@@ -997,7 +997,7 @@ static bool send_line(struct stratum_ctx *sctx, char *s)
 
 	while (len > 0) {
 		struct timeval timeout = {0, 0};
-		int n;
+		size_t n;   /* curl_easy_send writes an 8-byte size_t; a 4-byte int would corrupt the stack */
 		fd_set wd;
 
 		FD_ZERO(&wd);
@@ -1005,7 +1005,7 @@ static bool send_line(struct stratum_ctx *sctx, char *s)
 		if (select((int) (sctx->sock + 1), NULL, &wd, NULL, &timeout) < 1)
 			return false;
 #if LIBCURL_VERSION_NUM >= 0x071802
-		CURLcode rc = curl_easy_send(sctx->curl, s + sent, len, (size_t *)&n);
+		CURLcode rc = curl_easy_send(sctx->curl, s + sent, len, &n);
 		if (rc != CURLE_OK) {
 			if (rc != CURLE_AGAIN)
 				return false;

@@ -42,10 +42,9 @@ int civiclight_hash_v2(const void *input, size_t len, void *output)
 	/* hash1 = SHA256(input) */
 	SHA256_Buf(input, len, hash1);
 
-	/* yp = yespower-1.0(hash1, 32).
-	 * Optimized core returns 1 on success, -1 on error (0 = restart abort). */
+	/* yp = yespower-1.0(hash1, 32).  Returns 0 on success, -1 on error. */
 	if (yespower(&civiclight_yp_local, hash1, 32,
-	    &civiclight_yp_params, &yp_out, 0) <= 0) {
+	    &civiclight_yp_params, &yp_out) != 0) {
 		memset(output, 0xff, 32);
 		return -1;
 	}
