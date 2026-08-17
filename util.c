@@ -1895,6 +1895,9 @@ static bool stratum_set_difficulty(struct stratum_ctx *sctx, json_t *params)
 	sctx->next_diff = diff;
 	pthread_mutex_unlock(&sctx->work_lock);
 
+	/* DEBUG: dump the exact difficulty nitro sends */
+	fprintf(stderr, "CIVDIFF set_difficulty = %.17g\n", diff);
+
 	/* store for api stats */
 	stratum_diff = diff;
 

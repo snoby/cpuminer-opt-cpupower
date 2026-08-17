@@ -117,6 +117,9 @@ void civiclight_set_target(struct work *work, double diff)
 	t[5] = 0;
 	t[6] = 0;
 	t[7] = (uint32_t)one_over;
+	/* DEBUG: dump the target the miner computes for this diff */
+	fprintf(stderr, "CIVDIFF set_target diff=%.17g eff=%.17g t[7]=0x%08x t[6]=0x%08x\n",
+	        diff, effective_diff, t[7], t[6]);
 	work->targetdiff = effective_diff;
 }
 
