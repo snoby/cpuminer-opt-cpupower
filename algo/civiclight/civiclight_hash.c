@@ -23,6 +23,11 @@
 static __thread yespower_local_t civiclight_yp_local;
 static __thread int civiclight_yp_initialized = 0;
 
+/* Pool-specific Diff1 exponent for civiclight share difficulty.
+ * civicnet: 224 (t[7]=1/diff).  nitro: 256 (t[7]=2^32/diff, verified by
+ * live rejects).  Set via --civic-diff1. */
+int opt_civic_diff1_shift = 224;
+
 static const yespower_params_t civiclight_yp_params = {
     YESPOWER_1_0, 2048, 8, NULL, 0
 };
@@ -105,11 +110,11 @@ void civiclight_set_target(struct work *work, double diff)
 	 * ignored opt_diff_factor, so -m had no effect. */
 	double effective_diff = diff / opt_diff_factor;
 	/* Pool (BitcoinConstants.Diff1 = 2^224) accepts iff hash <= Diff1/diff,
-	 * so the most-significant limb t[7] = 1/diff.  Confirmed against the
-	 * official CivicNet/Soj miner (diff_to_hash, GCC_INT128: targ[1]=(1/diff)*2^96
-	 * in the upper 128-bit word => t[7]=1/diff).  Both official pools
-	 * (rabbit + nitro) use this convention. */
-	unsigned long long one_over = (unsigned long long)(1.0 / effective_diff);
+	 * so the most-significant limb t[7] = targ[1]/2^96 = 1/diff for civicnet
+	 * (Diff1=2^224).  nitro uses Diff1=2^256 -> t[7]=2^32/diff (verified
+	 * by live rejects).  opt_civic_diff1_shift selects the exponent. */
+	unsigned long long one_over =
+	    (unsigned long long)((double)(1ULL << (opt_civic_diff1_shift - 224)) / effective_diff);
 
 	t[0] = 0xFFFFFFFFU;
 	t[1] = 0xFFFFFFFFU;
