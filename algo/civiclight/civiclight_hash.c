@@ -62,14 +62,16 @@ int civiclight_hash_v2(const void *input, size_t len, void *output)
 
 int civiclight_powhash80(const void *header80, void *output)
 {
-	/* CivicNet civiclight v2 (verified against official CivicNet source):
-	 *   hash1 = SHA256(header80)   (SINGLE SHA256, done inside civiclight_hash_v2)
-	 *   yp    = yespower(hash1, 32, {YESPOWER_1_0, N=2048, r=8, pers=NULL})
-	 *   out   = SHA256(yp XOR hash1)
-	 * The old code wrongly pre-hashed the header (sha256d / extra SHA256),
-	 * which diverged from the network.  Pass the 80-byte header straight to
-	 * civiclight_hash_v2, which does the single SHA256(header80). */
-	return civiclight_hash_v2(header80, 80, output);
+	/* Match the official Soj-CivicLight miner (algo/civiclight/civiclight.c):
+	 *   intermediate = sha256d(header80)          = SHA256(SHA256(header80))
+	 *   then civiclight_core_v2(intermediate, 32):
+	 *     hash1 = SHA256(intermediate, 32)
+	 *     yp    = yespower(hash1, 32, {YESPOWER_1_0, N=2048, r=8, pers=NULL})
+	 *     out   = SHA256(yp XOR hash1)
+	 * civiclight_hash_v2 does the inner SHA256(intermediate,32)+yespower+XOR+SHA256. */
+	uint8_t intermediate[32];
+	sha256d(intermediate, (const unsigned char *)header80, 80);
+	return civiclight_hash_v2(intermediate, 32, output);
 }
 
 void civiclight_gate_hash(void *output, const void *input, uint32_t len)
