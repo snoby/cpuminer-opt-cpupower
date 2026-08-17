@@ -3360,11 +3360,6 @@ void parse_arg(int key, char *arg )
 		if (opt_yp_way < 1 || opt_yp_way > 2)
 			opt_yp_way = 1;
 		break;
-	case 1071: // civic-diff1 (Diff1 exponent for civiclight share target)
-		opt_civic_diff1_shift = atoi(arg);
-		if (opt_civic_diff1_shift < 224 || opt_civic_diff1_shift > 256)
-			opt_civic_diff1_shift = 224;
-		break;
 	case 'V':
 		show_version_and_exit();
 	case 'h':
