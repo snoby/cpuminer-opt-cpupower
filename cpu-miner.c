@@ -1324,15 +1324,16 @@ static int share_result( int result, struct work *work, const char *reason )
    // Routine accepts are silenced (overall hashrate comes from the 10s report).
    if ( !result || solved )
    {
+      const char *mark = solved ? " *** BLOCK SOLVED ***" : "";
 #if ((defined(_WIN64) || defined(__WINDOWS__)))
-   applog( LOG_NOTICE, "%s %lu/%lu (%s%%), %s %sH, %s %sH/s",
+   applog( LOG_NOTICE, "%s %lu/%lu (%s%%), %s %sH, %s %sH/s%s",
                        sres, ( result ? accepted_count : rejected_count ),
-                       total_submits, rate_s, hc, hc_units, hr, hr_units );
+                       total_submits, rate_s, hc, hc_units, hr, hr_units, mark );
 #else
-   applog( LOG_NOTICE, "%s %lu/%lu (%s%%), %s %sH, %s %sH/s, %dC",
+   applog( LOG_NOTICE, "%s %lu/%lu (%s%%), %s %sH, %s %sH/s, %dC%s",
                        sres, ( result ? accepted_count : rejected_count ),
                        total_submits, rate_s, hc, hc_units, hr, hr_units,
-                       (uint32_t)cpu_temp(0) );
+                       (uint32_t)cpu_temp(0), mark );
 #endif
    }
 
