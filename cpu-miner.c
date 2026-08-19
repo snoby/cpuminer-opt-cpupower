@@ -272,7 +272,27 @@ static void report_summary_log( bool force )
 		}
 	}
 #endif
-	
+
+	// 10-second overall hashrate report (aggregate across all threads)
+	{
+		static struct timeval ten_sec_start = {0};
+		struct timeval et10;
+		timeval_subtract( &et10, &now, &ten_sec_start );
+		if ( et10.tv_sec >= 10 ) {
+			memcpy( &ten_sec_start, &now, sizeof ten_sec_start );
+			double hrate = 0.;
+			pthread_mutex_lock( &stats_lock );
+			for ( int i = 0; i < opt_n_threads; i++ )
+				hrate += thr_hashrates[i];
+			pthread_mutex_unlock( &stats_lock );
+			char hr[16];
+			char hr_units[2] = {0,0};
+			scale_hash_for_display( &hrate, hr_units );
+			sprintf( hr, "%.2f", hrate );
+			applog( LOG_NOTICE, "Overall hashrate: %s %sH/s", hr, hr_units );
+		}
+	}
+
 	// Check if we should report
 	if ( !( force && ( submit_sum || ( et.tv_sec > 5 ) ) ) ) {
 		if ( et.tv_sec < 300 )
@@ -824,9 +844,12 @@ static bool get_mininginfo(CURL *curl, struct work *work)
                    {
 			restart_threads();
 			if (!opt_quiet) {
-			   char netinfo[64] = { 0 };
+			   char netinfo[128] = { 0 };
 			   char srate[32] = { 0 };
-			   sprintf(netinfo, "diff %.2f", net_diff);
+			   double pct = net_diff > 0. ? 100. * work->targetdiff / net_diff : 0.;
+			   snprintf(netinfo, sizeof netinfo,
+			            "Diff: Net %g, Stratum %g, Target %g (%.4g%% of net)",
+			            net_diff, stratum_diff, work->targetdiff, pct);
 			   if (net_hashrate) {
 				format_hashrate(net_hashrate, srate);
 				strcat(netinfo, ", net ");
@@ -1297,7 +1320,9 @@ static int share_result( int result, struct work *work, const char *reason )
       sprintf(hr, "%.2f", hashrate );
    }
 
-   if ( sharediff == 0 )
+   // Only surface non-routine events: rejections and solved blocks.
+   // Routine accepts are silenced (overall hashrate comes from the 10s report).
+   if ( !result || solved )
    {
 #if ((defined(_WIN64) || defined(__WINDOWS__)))
    applog( LOG_NOTICE, "%s %lu/%lu (%s%%), %s %sH, %s %sH/s",
@@ -1307,19 +1332,6 @@ static int share_result( int result, struct work *work, const char *reason )
    applog( LOG_NOTICE, "%s %lu/%lu (%s%%), %s %sH, %s %sH/s, %dC",
                        sres, ( result ? accepted_count : rejected_count ),
                        total_submits, rate_s, hc, hc_units, hr, hr_units,
-                       (uint32_t)cpu_temp(0) );
-#endif
-   }
-   else
-   {
-#if ((defined(_WIN64) || defined(__WINDOWS__)))
-   applog( LOG_NOTICE, "%s %lu/%lu (%s%%), diff %.3g%s, %s %sH/s",
-                       sres, ( result ? accepted_count : rejected_count ),
-                       total_submits, rate_s, sharediff, sol, hr, hr_units );
-#else
-   applog( LOG_NOTICE, "%s %lu/%lu (%s%%), diff %.3g%s, %s %sH/s, %dC",
-                       sres, ( result ? accepted_count : rejected_count ),
-                       total_submits, rate_s, sharediff, sol, hr, hr_units,
                        (uint32_t)cpu_temp(0) );
 #endif
    }
@@ -2404,9 +2416,7 @@ static void *miner_thread( void *userdata )
           for ( int n = 0; n < nonce_found; n++ )
           {
              *algo_gate.get_nonceptr( work.data ) = work.nonces[n];
-             if ( submit_work( mythr, &work ) )
-                applog( LOG_NOTICE, "Share submitted." );
-             else
+             if ( !submit_work( mythr, &work ) )
              {
                 applog( LOG_WARNING, "Failed to submit share." );
                 break;
@@ -2420,7 +2430,6 @@ static void *miner_thread( void *userdata )
                 applog( LOG_WARNING, "Failed to submit share." );
                 break;
              }
-             applog( LOG_NOTICE, "Share submitted." );
           }
 
           // prevent stale work in solo
@@ -2433,28 +2442,6 @@ static void *miner_thread( void *userdata )
              pthread_mutex_unlock( &g_work_lock );
           }
        }
-        // display hashrate
-        if ( !opt_quiet )
-        {
-           char hc[16];
-           char hr[16];
-           char hc_units[2] = {0,0};
-           char hr_units[2] = {0,0};
-           double hashcount = thr_hashcount[thr_id];
-           double hashrate  = thr_hashrates[thr_id];
-           if ( hashcount )
-           {
-              scale_hash_for_display( &hashcount, hc_units );
-              scale_hash_for_display( &hashrate,  hr_units );
-              if ( hc_units[0] )
-                 sprintf( hc, "%.2f", hashcount );
-              else // no fractions of a hash
-                 sprintf( hc, "%.0f", hashcount );
-              sprintf( hr, "%.2f", hashrate );
-              applog( LOG_INFO, "CPU #%d: %s %sH, %s %sH/s",
-                                thr_id, hc, hc_units, hr, hr_units );
-           }
-        }
         // Enhanced periodic reporting (thread 0 only)
         if ( thr_id == 0 )
            report_summary_log( false );
