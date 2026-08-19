@@ -26,7 +26,7 @@ set -e
 
 # -march=znver2 targets AMD Rome (Zen2, e.g. EPYC 7742) and runs on any Zen2/+
 # (Rome/Milan/Genoa). Portable across the fleet; NOT native-specific.
-BASE_CFLAGS="-O3 -march=znver2 -pthread -funroll-loops -fomit-frame-pointer -falign-functions=32 -falign-loops=32 -fvectorize -fslp-vectorize -DYP2_STAGED_PREFETCH"
+BASE_CFLAGS="-O3 -march=znver2 -pthread -funroll-loops -fomit-frame-pointer -falign-functions=32 -falign-loops=32 -fvectorize -fslp-vectorize"
 
 # Pick compiler: prefer clang (measured faster for yespower), else newest gcc
 if command -v clang >/dev/null; then
@@ -39,7 +39,7 @@ else
         fi
     done
     # gcc doesn't know clang's vectorize flags
-    BASE_CFLAGS="-O3 -march=znver2 -pthread -funroll-loops -fomit-frame-pointer -ftree-vectorize -DYP2_STAGED_PREFETCH"
+    BASE_CFLAGS="-O3 -march=znver2 -pthread -funroll-loops -fomit-frame-pointer -ftree-vectorize"
 fi
 echo "=== Compiler: $CC ($($CC --version | head -1)) ==="
 

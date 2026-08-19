@@ -1225,49 +1225,6 @@ static void yp2_blockmix_xor_save(salsa20_blk_t *Bin1out0,
 {
     size_t last = r * 2 - 1;
     yespower_2way_state_t a, b;
-#ifdef YP2_STAGED_PREFETCH
-    /* Staged (rolling) prefetch: prefetch block i+YP2_PF_DISTANCE just before
-     * processing block i, so each V[j] block load is in flight while earlier
-     * blocks' Salsa20/2+pwxform compute runs.  Replaces the old upfront burst
-     * of all 32 lines.  Distance 4 gives ~4 blocks of compute for the L3 hit
-     * to land.  Prefetch is a cache hint only -> hash output unchanged.
-     * Enabled via -DYP2_STAGED_PREFETCH (the stock PREFETCH macro is
-     * defined-then-undef'd at line 122-124, so #ifdef PREFETCH is dead). */
-#ifndef YP2_PF_DISTANCE
-#define YP2_PF_DISTANCE 4
-#endif
-    yp2_state_read(&a, &Bin1out0[last]);
-    yp2_state_xor(&a, &Bin20[last]);
-    yp2_state_read(&b, &Bin1out1[last]);
-    yp2_state_xor(&b, &Bin21[last]);
-    yp2_ctx_load(&a, ctx0);
-    yp2_ctx_load(&b, ctx1);
-
-    for (size_t i = 0; i <= last; ++i)
-    {
-        size_t pf = i + YP2_PF_DISTANCE;
-        if (pf <= last)
-        {
-            __builtin_prefetch(&Bin20[pf], 1, 3);
-            __builtin_prefetch(&Bin21[pf], 1, 3);
-        }
-        for (unsigned q = 0; q < 4; ++q)
-        {
-            __m128i ya = _mm_xor_si128(Bin20[i].q[q], Bin1out0[i].q[q]);
-            __m128i yb = _mm_xor_si128(Bin21[i].q[q], Bin1out1[i].q[q]);
-            Bin20[i].q[q] = ya;
-            Bin21[i].q[q] = yb;
-            a.x[q] = _mm_xor_si128(a.x[q], ya);
-            b.x[q] = _mm_xor_si128(b.x[q], yb);
-        }
-        yp2_pwxform(&a, &b);
-        if (i != last)
-        {
-            yp2_state_write(&Bin1out0[i], &a);
-            yp2_state_write(&Bin1out1[i], &b);
-        }
-    }
-#else
     yp2_state_read(&a, &Bin1out0[last]);
     yp2_state_xor(&a, &Bin20[last]);
     yp2_state_read(&b, &Bin1out1[last]);
@@ -1293,7 +1250,6 @@ static void yp2_blockmix_xor_save(salsa20_blk_t *Bin1out0,
             yp2_state_write(&Bin1out1[i], &b);
         }
     }
-#endif
     yp2_ctx_store(ctx0, &a);
     yp2_ctx_store(ctx1, &b);
     yp2_finish_salsa(&a, &Bin1out0[last]);
