@@ -67,10 +67,18 @@ static void *alloc_region(yespower_region_t *region, size_t size)
 			applog(LOG_INFO, "yespower: MAP_HUGETLB OK — %zu MB with 2MB pages",
 			       new_size / (1024*1024));
 	} else if (flags & MAP_HUGETLB) {
-		applog(LOG_WARNING, "yespower: MAP_HUGETLB FAILED (errno=%d: %s) — falling back to 4KB pages",
+		applog(LOG_WARNING, "yespower: MAP_HUGETLB FAILED (errno=%d: %s) — falling back to THP-backed normal memory",
 		       errno, strerror(errno));
 		flags &= ~MAP_HUGETLB;
 		base = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
+		if (base != MAP_FAILED) {
+#ifdef MADV_HUGEPAGE
+			/* Back with Transparent Huge Pages (THP) from normal memory:
+			 * no finite pool, never errno=12, no root required.  The kernel
+			 * promotes 2MB-aligned regions to THP automatically. */
+			madvise(base, size, MADV_HUGEPAGE);
+#endif
+		}
 	}
 
 #else

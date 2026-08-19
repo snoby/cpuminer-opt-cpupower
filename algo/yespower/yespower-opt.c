@@ -81,6 +81,9 @@
 #pragma GCC target ("tune=corei7")
 #endif
 #include <emmintrin.h>
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 #ifdef __XOP__
 #include <x86intrin.h>
 #endif
@@ -850,6 +853,798 @@ static void smix(uint8_t *B, size_t r, uint32_t N,
 #define smix smix_0_9
 #include "yespower-opt.c"
 #undef smix
+
+#if defined(__AVX2__)
+/* Deliberate Rome/AVX2-only scope: Soj also supports an SSE2 pair path. */
+/* CivicLight fixed-parameter two-lane kernel.  PWX has data-dependent loads
+ * and writes, so operations remain ordered within each lane.  Alternating the
+ * lanes gives the CPU independent work while one lane's loads are pending. */
+typedef struct
+{
+    __m128i x[4];
+    uint8_t *S0, *S1, *S2;
+    size_t w;
+} yespower_2way_state_t;
+
+static inline __attribute__((always_inline)) __m128i
+yp2_pwx_1_0(__m128i X, const uint8_t *S0, const uint8_t *S1)
+{
+    uint64_t x = EXTRACT64(X) & Smask2_0_9;
+    uint32_t lo = (uint32_t)x;
+    uint32_t hi = (uint32_t)(x >> 32);
+    X = _mm_mul_epu32(HI32(X), X);
+    X = _mm_add_epi64(X, *(__m128i *)(S0 + lo));
+    return _mm_xor_si128(X, *(__m128i *)(S1 + hi));
+}
+
+static inline __attribute__((always_inline)) void
+yp2_pwx_1_0_pair(__m128i *Xa,
+                   __m128i *Xb,
+                   const uint8_t *S0a,
+                   const uint8_t *S1a,
+                   const uint8_t *S0b,
+                   const uint8_t *S1b)
+{
+#ifdef __AVX2__
+    uint64_t xa = EXTRACT64(*Xa) & Smask2_0_9;
+    uint64_t xb = EXTRACT64(*Xb) & Smask2_0_9;
+    __m256i X = _mm256_set_m128i(*Xb, *Xa);
+    __m256i H = _mm256_srli_si256(X, 4);
+    __m256i add = _mm256_set_m128i(*(__m128i *)(S0b + (uint32_t)xb),
+                                    *(__m128i *)(S0a + (uint32_t)xa));
+    __m256i xorv = _mm256_set_m128i(*(__m128i *)(S1b + (uint32_t)(xb >> 32)),
+                                     *(__m128i *)(S1a + (uint32_t)(xa >> 32)));
+    X = _mm256_mul_epu32(H, X);
+    X = _mm256_add_epi64(X, add);
+    X = _mm256_xor_si256(X, xorv);
+    *Xa = _mm256_castsi256_si128(X);
+    *Xb = _mm256_extracti128_si256(X, 1);
+#else
+    *Xa = yp2_pwx_1_0(*Xa, S0a, S1a);
+    *Xb = yp2_pwx_1_0(*Xb, S0b, S1b);
+#endif
+}
+
+#define YP2_STEP(I)                                                                                              \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        yp2_pwx_1_0_pair(&a->x[I], &b->x[I], a->S0, a->S1, b->S0, b->S1);                                         \
+    } while (0)
+
+#define YP2_STEP_WRITE(I, MEMBER)                                                                                \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        yp2_pwx_1_0_pair(&a->x[I], &b->x[I], a->S0, a->S1, b->S0, b->S1);                                         \
+        *(__m128i *)(a->MEMBER + a->w) = a->x[I];                                                                     \
+        *(__m128i *)(b->MEMBER + b->w) = b->x[I];                                                                     \
+    } while (0)
+
+static inline __attribute__((always_inline)) void
+yp2_pwxform(yespower_2way_state_t *a, yespower_2way_state_t *b)
+{
+    YP2_STEP_WRITE(0, S0);
+    YP2_STEP_WRITE(1, S1);
+    a->w += 16;
+    b->w += 16;
+    YP2_STEP_WRITE(2, S0);
+    YP2_STEP_WRITE(3, S1);
+    a->w += 16;
+    b->w += 16;
+
+    YP2_STEP_WRITE(0, S0);
+    YP2_STEP_WRITE(1, S1);
+    a->w += 16;
+    b->w += 16;
+    YP2_STEP(2);
+    YP2_STEP(3);
+
+    YP2_STEP_WRITE(0, S0);
+    YP2_STEP_WRITE(1, S1);
+    a->w += 16;
+    b->w += 16;
+    YP2_STEP(2);
+    YP2_STEP(3);
+
+    a->w &= Smask2_0_9;
+    b->w &= Smask2_0_9;
+    uint8_t *tmp = a->S2;
+    a->S2 = a->S1;
+    a->S1 = a->S0;
+    a->S0 = tmp;
+    tmp = b->S2;
+    b->S2 = b->S1;
+    b->S1 = b->S0;
+    b->S0 = tmp;
+}
+
+#undef YP2_STEP_WRITE
+#undef YP2_STEP
+
+static inline void yp2_state_read(yespower_2way_state_t *st, const salsa20_blk_t *in)
+{
+    st->x[0] = in->q[0];
+    st->x[1] = in->q[1];
+    st->x[2] = in->q[2];
+    st->x[3] = in->q[3];
+}
+
+static inline void yp2_state_xor(yespower_2way_state_t *st, const salsa20_blk_t *in)
+{
+    st->x[0] = _mm_xor_si128(st->x[0], in->q[0]);
+    st->x[1] = _mm_xor_si128(st->x[1], in->q[1]);
+    st->x[2] = _mm_xor_si128(st->x[2], in->q[2]);
+    st->x[3] = _mm_xor_si128(st->x[3], in->q[3]);
+}
+
+static inline void yp2_state_write(salsa20_blk_t *out, const yespower_2way_state_t *st)
+{
+    out->q[0] = st->x[0];
+    out->q[1] = st->x[1];
+    out->q[2] = st->x[2];
+    out->q[3] = st->x[3];
+}
+
+static inline void yp2_finish_salsa(yespower_2way_state_t *st, salsa20_blk_t *out)
+{
+    __m128i X0 = st->x[0], X1 = st->x[1], X2 = st->x[2], X3 = st->x[3];
+    SALSA20((*out));
+}
+
+static inline void yp2_ctx_load(yespower_2way_state_t *st, const pwxform_ctx_t *ctx)
+{
+    st->S0 = ctx->S0;
+    st->S1 = ctx->S1;
+    st->S2 = ctx->S2;
+    st->w = ctx->w;
+}
+
+static inline void yp2_ctx_store(pwxform_ctx_t *ctx, const yespower_2way_state_t *st)
+{
+    ctx->S0 = st->S0;
+    ctx->S1 = st->S1;
+    ctx->S2 = st->S2;
+    ctx->w = st->w;
+}
+
+#ifdef __AVX2__
+/* Run the two independent Salsa20/2 states in the 128-bit halves of YMM
+ * registers.  VPSHUFD is lane-local, so this is exactly the scalar SIMD
+ * layout duplicated across the low and high halves. */
+#define YP2_SALSA_ARX(OUT, IN1, IN2, SHIFT)                                                                         \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        __m256i yp2_salsa_tmp = _mm256_add_epi32((IN1), (IN2));                                                     \
+        (OUT) = _mm256_xor_si256((OUT), _mm256_slli_epi32(yp2_salsa_tmp, (SHIFT)));                                \
+        (OUT) = _mm256_xor_si256((OUT), _mm256_srli_epi32(yp2_salsa_tmp, 32 - (SHIFT)));                           \
+    } while (0)
+
+static inline __attribute__((always_inline)) __m256i
+yp2_salsa_pack(__m128i low, __m128i high)
+{
+    return _mm256_set_m128i(high, low);
+}
+
+static inline __attribute__((always_inline)) void
+yp2_salsa2(__m256i *X0p,
+                  __m256i *X1p,
+                  __m256i *X2p,
+                  __m256i *X3p,
+                  salsa20_blk_t *out0,
+                  salsa20_blk_t *out1)
+{
+    __m256i X0 = *X0p, X1 = *X1p, X2 = *X2p, X3 = *X3p;
+    __m256i Z0 = X0, Z1 = X1, Z2 = X2, Z3 = X3;
+
+    YP2_SALSA_ARX(X1, X0, X3, 7);
+    YP2_SALSA_ARX(X2, X1, X0, 9);
+    YP2_SALSA_ARX(X3, X2, X1, 13);
+    YP2_SALSA_ARX(X0, X3, X2, 18);
+    X1 = _mm256_shuffle_epi32(X1, 0x93);
+    X2 = _mm256_shuffle_epi32(X2, 0x4e);
+    X3 = _mm256_shuffle_epi32(X3, 0x39);
+    YP2_SALSA_ARX(X3, X0, X1, 7);
+    YP2_SALSA_ARX(X2, X3, X0, 9);
+    YP2_SALSA_ARX(X1, X2, X3, 13);
+    YP2_SALSA_ARX(X0, X1, X2, 18);
+    X1 = _mm256_shuffle_epi32(X1, 0x39);
+    X2 = _mm256_shuffle_epi32(X2, 0x4e);
+    X3 = _mm256_shuffle_epi32(X3, 0x93);
+
+    X0 = _mm256_add_epi32(X0, Z0);
+    X1 = _mm256_add_epi32(X1, Z1);
+    X2 = _mm256_add_epi32(X2, Z2);
+    X3 = _mm256_add_epi32(X3, Z3);
+    *X0p = X0;
+    *X1p = X1;
+    *X2p = X2;
+    *X3p = X3;
+    out0->q[0] = _mm256_castsi256_si128(X0);
+    out0->q[1] = _mm256_castsi256_si128(X1);
+    out0->q[2] = _mm256_castsi256_si128(X2);
+    out0->q[3] = _mm256_castsi256_si128(X3);
+    out1->q[0] = _mm256_extracti128_si256(X0, 1);
+    out1->q[1] = _mm256_extracti128_si256(X1, 1);
+    out1->q[2] = _mm256_extracti128_si256(X2, 1);
+    out1->q[3] = _mm256_extracti128_si256(X3, 1);
+}
+
+static inline __attribute__((always_inline)) void
+yp2_blockmix_salsa(const salsa20_blk_t *Bin0,
+                          salsa20_blk_t *Bout0,
+                          const salsa20_blk_t *Bin1,
+                          salsa20_blk_t *Bout1)
+{
+    __m256i X0 = yp2_salsa_pack(Bin0[1].q[0], Bin1[1].q[0]);
+    __m256i X1 = yp2_salsa_pack(Bin0[1].q[1], Bin1[1].q[1]);
+    __m256i X2 = yp2_salsa_pack(Bin0[1].q[2], Bin1[1].q[2]);
+    __m256i X3 = yp2_salsa_pack(Bin0[1].q[3], Bin1[1].q[3]);
+
+#define YP2_SALSA_XOR_PAIR(BLOCK0, BLOCK1)                                                                          \
+    X0 = _mm256_xor_si256(X0, yp2_salsa_pack((BLOCK0).q[0], (BLOCK1).q[0]));                                       \
+    X1 = _mm256_xor_si256(X1, yp2_salsa_pack((BLOCK0).q[1], (BLOCK1).q[1]));                                       \
+    X2 = _mm256_xor_si256(X2, yp2_salsa_pack((BLOCK0).q[2], (BLOCK1).q[2]));                                       \
+    X3 = _mm256_xor_si256(X3, yp2_salsa_pack((BLOCK0).q[3], (BLOCK1).q[3]))
+
+    YP2_SALSA_XOR_PAIR(Bin0[0], Bin1[0]);
+    yp2_salsa2(&X0, &X1, &X2, &X3, &Bout0[0], &Bout1[0]);
+    YP2_SALSA_XOR_PAIR(Bin0[1], Bin1[1]);
+    yp2_salsa2(&X0, &X1, &X2, &X3, &Bout0[1], &Bout1[1]);
+#undef YP2_SALSA_XOR_PAIR
+}
+
+static inline __attribute__((always_inline)) void
+yp2_blockmix_salsa_xor(const salsa20_blk_t *Bin10,
+                              const salsa20_blk_t *Bin20,
+                              salsa20_blk_t *Bout0,
+                              const salsa20_blk_t *Bin11,
+                              const salsa20_blk_t *Bin21,
+                              salsa20_blk_t *Bout1,
+                              uint32_t result[2])
+{
+    __m256i X0 = yp2_salsa_pack(_mm_xor_si128(Bin10[1].q[0], Bin20[1].q[0]),
+                                  _mm_xor_si128(Bin11[1].q[0], Bin21[1].q[0]));
+    __m256i X1 = yp2_salsa_pack(_mm_xor_si128(Bin10[1].q[1], Bin20[1].q[1]),
+                                  _mm_xor_si128(Bin11[1].q[1], Bin21[1].q[1]));
+    __m256i X2 = yp2_salsa_pack(_mm_xor_si128(Bin10[1].q[2], Bin20[1].q[2]),
+                                  _mm_xor_si128(Bin11[1].q[2], Bin21[1].q[2]));
+    __m256i X3 = yp2_salsa_pack(_mm_xor_si128(Bin10[1].q[3], Bin20[1].q[3]),
+                                  _mm_xor_si128(Bin11[1].q[3], Bin21[1].q[3]));
+
+#define YP2_SALSA_XOR_FOUR(A0, B0, A1, B1)                                                                          \
+    X0 = _mm256_xor_si256(X0, yp2_salsa_pack(_mm_xor_si128((A0).q[0], (B0).q[0]),                                 \
+                                                _mm_xor_si128((A1).q[0], (B1).q[0])));                                \
+    X1 = _mm256_xor_si256(X1, yp2_salsa_pack(_mm_xor_si128((A0).q[1], (B0).q[1]),                                 \
+                                                _mm_xor_si128((A1).q[1], (B1).q[1])));                                \
+    X2 = _mm256_xor_si256(X2, yp2_salsa_pack(_mm_xor_si128((A0).q[2], (B0).q[2]),                                 \
+                                                _mm_xor_si128((A1).q[2], (B1).q[2])));                                \
+    X3 = _mm256_xor_si256(X3, yp2_salsa_pack(_mm_xor_si128((A0).q[3], (B0).q[3]),                                 \
+                                                _mm_xor_si128((A1).q[3], (B1).q[3])))
+
+    YP2_SALSA_XOR_FOUR(Bin10[0], Bin20[0], Bin11[0], Bin21[0]);
+    yp2_salsa2(&X0, &X1, &X2, &X3, &Bout0[0], &Bout1[0]);
+    YP2_SALSA_XOR_FOUR(Bin10[1], Bin20[1], Bin11[1], Bin21[1]);
+    yp2_salsa2(&X0, &X1, &X2, &X3, &Bout0[1], &Bout1[1]);
+#undef YP2_SALSA_XOR_FOUR
+    result[0] = (uint32_t)Bout0[1].d[0];
+    result[1] = (uint32_t)Bout1[1].d[0];
+}
+
+#undef YP2_SALSA_ARX
+#endif
+
+static void yp2_blockmix(const salsa20_blk_t *Bin0,
+                                salsa20_blk_t *Bout0,
+                                pwxform_ctx_t *ctx0,
+                                const salsa20_blk_t *Bin1,
+                                salsa20_blk_t *Bout1,
+                                pwxform_ctx_t *ctx1,
+                                size_t r)
+{
+    size_t last = r * 2 - 1;
+    yespower_2way_state_t a, b;
+    yp2_state_read(&a, &Bin0[last]);
+    yp2_state_read(&b, &Bin1[last]);
+    yp2_ctx_load(&a, ctx0);
+    yp2_ctx_load(&b, ctx1);
+
+    for (size_t i = 0; i <= last; ++i)
+    {
+        yp2_state_xor(&a, &Bin0[i]);
+        yp2_state_xor(&b, &Bin1[i]);
+        yp2_pwxform(&a, &b);
+        if (i != last)
+        {
+            yp2_state_write(&Bout0[i], &a);
+            yp2_state_write(&Bout1[i], &b);
+        }
+    }
+    yp2_ctx_store(ctx0, &a);
+    yp2_ctx_store(ctx1, &b);
+    yp2_finish_salsa(&a, &Bout0[last]);
+    yp2_finish_salsa(&b, &Bout1[last]);
+}
+
+static void yp2_blockmix_xor(const salsa20_blk_t *Bin10,
+                                    const salsa20_blk_t *Bin20,
+                                    salsa20_blk_t *Bout0,
+                                    pwxform_ctx_t *ctx0,
+                                    const salsa20_blk_t *Bin11,
+                                    const salsa20_blk_t *Bin21,
+                                    salsa20_blk_t *Bout1,
+                                    pwxform_ctx_t *ctx1,
+                                    size_t r,
+                                    uint32_t result[2])
+{
+    size_t last = r * 2 - 1;
+    yespower_2way_state_t a, b;
+#ifdef PREFETCH
+    PREFETCH(&Bin20[last], _MM_HINT_T0)
+    PREFETCH(&Bin21[last], _MM_HINT_T0)
+    for (size_t p = 0; p < last; ++p)
+    {
+        PREFETCH(&Bin20[p], _MM_HINT_T0)
+        PREFETCH(&Bin21[p], _MM_HINT_T0)
+    }
+#endif
+    yp2_state_read(&a, &Bin10[last]);
+    yp2_state_xor(&a, &Bin20[last]);
+    yp2_state_read(&b, &Bin11[last]);
+    yp2_state_xor(&b, &Bin21[last]);
+    yp2_ctx_load(&a, ctx0);
+    yp2_ctx_load(&b, ctx1);
+
+    for (size_t i = 0; i <= last; ++i)
+    {
+        yp2_state_xor(&a, &Bin10[i]);
+        yp2_state_xor(&a, &Bin20[i]);
+        yp2_state_xor(&b, &Bin11[i]);
+        yp2_state_xor(&b, &Bin21[i]);
+        yp2_pwxform(&a, &b);
+        if (i != last)
+        {
+            yp2_state_write(&Bout0[i], &a);
+            yp2_state_write(&Bout1[i], &b);
+        }
+    }
+    yp2_ctx_store(ctx0, &a);
+    yp2_ctx_store(ctx1, &b);
+    yp2_finish_salsa(&a, &Bout0[last]);
+    yp2_finish_salsa(&b, &Bout1[last]);
+    result[0] = (uint32_t)Bout0[last].d[0];
+    result[1] = (uint32_t)Bout1[last].d[0];
+}
+
+static void yp2_blockmix_xor_save(salsa20_blk_t *Bin1out0,
+                                         salsa20_blk_t *Bin20,
+                                         pwxform_ctx_t *ctx0,
+                                         salsa20_blk_t *Bin1out1,
+                                         salsa20_blk_t *Bin21,
+                                         pwxform_ctx_t *ctx1,
+                                         size_t r,
+                                         uint32_t result[2])
+{
+    size_t last = r * 2 - 1;
+    yespower_2way_state_t a, b;
+#ifdef YP2_STAGED_PREFETCH
+    /* Staged (rolling) prefetch: prefetch block i+YP2_PF_DISTANCE just before
+     * processing block i, so each V[j] block load is in flight while earlier
+     * blocks' Salsa20/2+pwxform compute runs.  Replaces the old upfront burst
+     * of all 32 lines.  Distance 4 gives ~4 blocks of compute for the L3 hit
+     * to land.  Prefetch is a cache hint only -> hash output unchanged.
+     * Enabled via -DYP2_STAGED_PREFETCH (the stock PREFETCH macro is
+     * defined-then-undef'd at line 122-124, so #ifdef PREFETCH is dead). */
+#ifndef YP2_PF_DISTANCE
+#define YP2_PF_DISTANCE 4
+#endif
+    yp2_state_read(&a, &Bin1out0[last]);
+    yp2_state_xor(&a, &Bin20[last]);
+    yp2_state_read(&b, &Bin1out1[last]);
+    yp2_state_xor(&b, &Bin21[last]);
+    yp2_ctx_load(&a, ctx0);
+    yp2_ctx_load(&b, ctx1);
+
+    for (size_t i = 0; i <= last; ++i)
+    {
+        size_t pf = i + YP2_PF_DISTANCE;
+        if (pf <= last)
+        {
+            __builtin_prefetch(&Bin20[pf], 1, 3);
+            __builtin_prefetch(&Bin21[pf], 1, 3);
+        }
+        for (unsigned q = 0; q < 4; ++q)
+        {
+            __m128i ya = _mm_xor_si128(Bin20[i].q[q], Bin1out0[i].q[q]);
+            __m128i yb = _mm_xor_si128(Bin21[i].q[q], Bin1out1[i].q[q]);
+            Bin20[i].q[q] = ya;
+            Bin21[i].q[q] = yb;
+            a.x[q] = _mm_xor_si128(a.x[q], ya);
+            b.x[q] = _mm_xor_si128(b.x[q], yb);
+        }
+        yp2_pwxform(&a, &b);
+        if (i != last)
+        {
+            yp2_state_write(&Bin1out0[i], &a);
+            yp2_state_write(&Bin1out1[i], &b);
+        }
+    }
+#else
+    yp2_state_read(&a, &Bin1out0[last]);
+    yp2_state_xor(&a, &Bin20[last]);
+    yp2_state_read(&b, &Bin1out1[last]);
+    yp2_state_xor(&b, &Bin21[last]);
+    yp2_ctx_load(&a, ctx0);
+    yp2_ctx_load(&b, ctx1);
+
+    for (size_t i = 0; i <= last; ++i)
+    {
+        for (unsigned q = 0; q < 4; ++q)
+        {
+            __m128i ya = _mm_xor_si128(Bin20[i].q[q], Bin1out0[i].q[q]);
+            __m128i yb = _mm_xor_si128(Bin21[i].q[q], Bin1out1[i].q[q]);
+            Bin20[i].q[q] = ya;
+            Bin21[i].q[q] = yb;
+            a.x[q] = _mm_xor_si128(a.x[q], ya);
+            b.x[q] = _mm_xor_si128(b.x[q], yb);
+        }
+        yp2_pwxform(&a, &b);
+        if (i != last)
+        {
+            yp2_state_write(&Bin1out0[i], &a);
+            yp2_state_write(&Bin1out1[i], &b);
+        }
+    }
+#endif
+    yp2_ctx_store(ctx0, &a);
+    yp2_ctx_store(ctx1, &b);
+    yp2_finish_salsa(&a, &Bin1out0[last]);
+    yp2_finish_salsa(&b, &Bin1out1[last]);
+    result[0] = (uint32_t)Bin1out0[last].d[0];
+    result[1] = (uint32_t)Bin1out1[last].d[0];
+}
+
+#ifdef __AVX2__
+static void yp2_smix1_salsa(uint8_t *B0,
+                                   uint8_t *B1,
+                                   salsa20_blk_t *V0,
+                                   salsa20_blk_t *V1,
+                                   salsa20_blk_t *XY0,
+                                   salsa20_blk_t *XY1)
+{
+    enum { yp2_salsa_N = 768, yp2_salsa_s = 2 };
+    salsa20_blk_t *X[2] = {V0, V1};
+    salsa20_blk_t *Y[2] = {&V0[yp2_salsa_s], &V1[yp2_salsa_s]};
+    salsa20_blk_t *V[2] = {V0, V1};
+    uint8_t *B[2] = {B0, B1};
+    uint32_t j[2], result[2];
+
+    for (unsigned lane = 0; lane < 2; ++lane)
+        for (size_t i = 0; i < 2; ++i)
+        {
+            salsa20_blk_t *tmp = Y[lane];
+            salsa20_blk_t *dst = &X[lane][i];
+            const salsa20_blk_t *src = (salsa20_blk_t *)&B[lane][i * 64];
+            for (size_t k = 0; k < 16; ++k)
+                tmp->w[k] = le32dec(&src->w[k]);
+            salsa20_simd_shuffle(tmp, dst);
+        }
+
+    yp2_blockmix_salsa(X[0], Y[0], X[1], Y[1]);
+    X[0] = Y[0] + yp2_salsa_s;
+    X[1] = Y[1] + yp2_salsa_s;
+    yp2_blockmix_salsa(Y[0], X[0], Y[1], X[1]);
+    j[0] = integerify(X[0], 1);
+    j[1] = integerify(X[1], 1);
+
+    uint32_t n;
+    for (n = 2; n < yp2_salsa_N; n <<= 1)
+    {
+        uint32_t m = (n < yp2_salsa_N / 2) ? n : (yp2_salsa_N - 1 - n);
+        for (uint32_t i = 1; i < m; i += 2)
+        {
+            Y[0] = X[0] + yp2_salsa_s;
+            Y[1] = X[1] + yp2_salsa_s;
+            salsa20_blk_t *Vj0 = &V[0][((j[0] & (n - 1)) + i - 1) * yp2_salsa_s];
+            salsa20_blk_t *Vj1 = &V[1][((j[1] & (n - 1)) + i - 1) * yp2_salsa_s];
+            yp2_blockmix_salsa_xor(X[0], Vj0, Y[0], X[1], Vj1, Y[1], result);
+            j[0] = result[0];
+            j[1] = result[1];
+            Vj0 = &V[0][((j[0] & (n - 1)) + i) * yp2_salsa_s];
+            Vj1 = &V[1][((j[1] & (n - 1)) + i) * yp2_salsa_s];
+            X[0] = Y[0] + yp2_salsa_s;
+            X[1] = Y[1] + yp2_salsa_s;
+            yp2_blockmix_salsa_xor(Y[0], Vj0, X[0], Y[1], Vj1, X[1], result);
+            j[0] = result[0];
+            j[1] = result[1];
+        }
+    }
+    n >>= 1;
+
+    Y[0] = X[0] + yp2_salsa_s;
+    Y[1] = X[1] + yp2_salsa_s;
+    salsa20_blk_t *Vj0 = &V[0][((j[0] & (n - 1)) + yp2_salsa_N - 2 - n) * yp2_salsa_s];
+    salsa20_blk_t *Vj1 = &V[1][((j[1] & (n - 1)) + yp2_salsa_N - 2 - n) * yp2_salsa_s];
+    yp2_blockmix_salsa_xor(X[0], Vj0, Y[0], X[1], Vj1, Y[1], result);
+    j[0] = result[0];
+    j[1] = result[1];
+    Vj0 = &V[0][((j[0] & (n - 1)) + yp2_salsa_N - 1 - n) * yp2_salsa_s];
+    Vj1 = &V[1][((j[1] & (n - 1)) + yp2_salsa_N - 1 - n) * yp2_salsa_s];
+    yp2_blockmix_salsa_xor(Y[0], Vj0, XY0, Y[1], Vj1, XY1, result);
+
+    salsa20_blk_t *XY[2] = {XY0, XY1};
+    for (unsigned lane = 0; lane < 2; ++lane)
+        for (size_t i = 0; i < 2; ++i)
+        {
+            salsa20_blk_t *tmp = &XY[lane][yp2_salsa_s];
+            salsa20_blk_t *dst = (salsa20_blk_t *)&B[lane][i * 64];
+            for (size_t k = 0; k < 16; ++k)
+                le32enc(&tmp->w[k], XY[lane][i].w[k]);
+            salsa20_simd_unshuffle(tmp, dst);
+        }
+}
+
+#endif
+
+static void yespower_smix1_1_0_2way(uint8_t *B0,
+                                 uint8_t *B1,
+                                 size_t r,
+                                 uint32_t N,
+                                 salsa20_blk_t *V0,
+                                 salsa20_blk_t *V1,
+                                 salsa20_blk_t *XY0,
+                                 salsa20_blk_t *XY1,
+                                 pwxform_ctx_t *ctx0,
+                                 pwxform_ctx_t *ctx1)
+{
+    size_t s = 2 * r;
+    salsa20_blk_t *X[2] = {V0, V1};
+    salsa20_blk_t *Y[2] = {&V0[s], &V1[s]};
+    uint8_t *B[2] = {B0, B1};
+    uint32_t j[2], result[2];
+
+    for (unsigned lane = 0; lane < 2; ++lane)
+        for (size_t i = 0; i < 2; ++i)
+        {
+            salsa20_blk_t *tmp = Y[lane];
+            salsa20_blk_t *dst = &X[lane][i];
+            const salsa20_blk_t *src = (salsa20_blk_t *)&B[lane][i * 64];
+            for (size_t k = 0; k < 16; ++k)
+                tmp->w[k] = le32dec(&src->w[k]);
+            salsa20_simd_shuffle(tmp, dst);
+        }
+
+    for (size_t i = 1; i < r; ++i)
+        yp2_blockmix(&X[0][(i - 1) * 2], &X[0][i * 2], ctx0,
+                            &X[1][(i - 1) * 2], &X[1][i * 2], ctx1, 1);
+
+    yp2_blockmix(X[0], Y[0], ctx0, X[1], Y[1], ctx1, r);
+    X[0] = Y[0] + s;
+    X[1] = Y[1] + s;
+    yp2_blockmix(Y[0], X[0], ctx0, Y[1], X[1], ctx1, r);
+    j[0] = integerify(X[0], r);
+    j[1] = integerify(X[1], r);
+
+    uint32_t n;
+    for (n = 2; n < N; n <<= 1)
+    {
+        uint32_t m = (n < N / 2) ? n : (N - 1 - n);
+        for (uint32_t i = 1; i < m; i += 2)
+        {
+            Y[0] = X[0] + s;
+            Y[1] = X[1] + s;
+            salsa20_blk_t *Vj0 = &V0[((j[0] & (n - 1)) + i - 1) * s];
+            salsa20_blk_t *Vj1 = &V1[((j[1] & (n - 1)) + i - 1) * s];
+            _mm_prefetch((const char *)Vj0, _MM_HINT_T0);
+            _mm_prefetch((const char *)Vj1, _MM_HINT_T0);
+            yp2_blockmix_xor(X[0], Vj0, Y[0], ctx0, X[1], Vj1, Y[1], ctx1, r, result);
+            j[0] = result[0];
+            j[1] = result[1];
+            Vj0 = &V0[((j[0] & (n - 1)) + i) * s];
+            Vj1 = &V1[((j[1] & (n - 1)) + i) * s];
+            _mm_prefetch((const char *)Vj0, _MM_HINT_T0);
+            _mm_prefetch((const char *)Vj1, _MM_HINT_T0);
+            X[0] = Y[0] + s;
+            X[1] = Y[1] + s;
+            yp2_blockmix_xor(Y[0], Vj0, X[0], ctx0, Y[1], Vj1, X[1], ctx1, r, result);
+            j[0] = result[0];
+            j[1] = result[1];
+        }
+    }
+    n >>= 1;
+
+    Y[0] = X[0] + s;
+    Y[1] = X[1] + s;
+    salsa20_blk_t *Vj0 = &V0[((j[0] & (n - 1)) + N - 2 - n) * s];
+    salsa20_blk_t *Vj1 = &V1[((j[1] & (n - 1)) + N - 2 - n) * s];
+    yp2_blockmix_xor(X[0], Vj0, Y[0], ctx0, X[1], Vj1, Y[1], ctx1, r, result);
+    j[0] = result[0];
+    j[1] = result[1];
+    Vj0 = &V0[((j[0] & (n - 1)) + N - 1 - n) * s];
+    Vj1 = &V1[((j[1] & (n - 1)) + N - 1 - n) * s];
+    yp2_blockmix_xor(Y[0], Vj0, XY0, ctx0, Y[1], Vj1, XY1, ctx1, r, result);
+
+    salsa20_blk_t *XY[2] = {XY0, XY1};
+    for (unsigned lane = 0; lane < 2; ++lane)
+        for (size_t i = 0; i < 2 * r; ++i)
+        {
+            salsa20_blk_t *tmp = &XY[lane][s];
+            salsa20_blk_t *dst = (salsa20_blk_t *)&B[lane][i * 64];
+            for (size_t k = 0; k < 16; ++k)
+                le32enc(&tmp->w[k], XY[lane][i].w[k]);
+            salsa20_simd_unshuffle(tmp, dst);
+        }
+}
+
+static void yespower_smix2_1_0_2way(uint8_t *B0,
+                                 uint8_t *B1,
+                                 size_t r,
+                                 uint32_t N,
+                                 uint32_t Nloop,
+                                 salsa20_blk_t *V0,
+                                 salsa20_blk_t *V1,
+                                 salsa20_blk_t *XY0,
+                                 salsa20_blk_t *XY1,
+                                 pwxform_ctx_t *ctx0,
+                                 pwxform_ctx_t *ctx1)
+{
+    size_t s = 2 * r;
+    uint8_t *B[2] = {B0, B1};
+    salsa20_blk_t *V[2] = {V0, V1};
+    salsa20_blk_t *X[2] = {XY0, XY1};
+    salsa20_blk_t *Y[2] = {&XY0[s], &XY1[s]};
+    uint32_t j[2], result[2];
+
+    for (unsigned lane = 0; lane < 2; ++lane)
+        for (size_t i = 0; i < 2 * r; ++i)
+        {
+            salsa20_blk_t *tmp = Y[lane];
+            salsa20_blk_t *dst = &X[lane][i];
+            const salsa20_blk_t *src = (salsa20_blk_t *)&B[lane][i * 64];
+            for (size_t k = 0; k < 16; ++k)
+                tmp->w[k] = le32dec(&src->w[k]);
+            salsa20_simd_shuffle(tmp, dst);
+        }
+    j[0] = integerify(X[0], r) & (N - 1);
+    j[1] = integerify(X[1], r) & (N - 1);
+
+    do
+    {
+        salsa20_blk_t *Vj0 = &V[0][j[0] * s];
+        salsa20_blk_t *Vj1 = &V[1][j[1] * s];
+        yp2_blockmix_xor_save(X[0], Vj0, ctx0, X[1], Vj1, ctx1, r, result);
+        j[0] = result[0] & (N - 1);
+        j[1] = result[1] & (N - 1);
+        Vj0 = &V[0][j[0] * s];
+        Vj1 = &V[1][j[1] * s];
+        yp2_blockmix_xor_save(X[0], Vj0, ctx0, X[1], Vj1, ctx1, r, result);
+        j[0] = result[0] & (N - 1);
+        j[1] = result[1] & (N - 1);
+    } while (Nloop -= 2);
+
+    for (unsigned lane = 0; lane < 2; ++lane)
+        for (size_t i = 0; i < 2 * r; ++i)
+        {
+            salsa20_blk_t *tmp = Y[lane];
+            salsa20_blk_t *dst = (salsa20_blk_t *)&B[lane][i * 64];
+            for (size_t k = 0; k < 16; ++k)
+                le32enc(&tmp->w[k], X[lane][i].w[k]);
+            salsa20_simd_unshuffle(tmp, dst);
+        }
+}
+
+static void yespower_smix_1_0_2way(uint8_t *B0,
+                                uint8_t *B1,
+                                uint32_t N,
+                                uint32_t r,
+                                salsa20_blk_t *V0,
+                                salsa20_blk_t *V1,
+                                salsa20_blk_t *XY0,
+                                salsa20_blk_t *XY1,
+                                pwxform_ctx_t *ctx0,
+                                pwxform_ctx_t *ctx1)
+{
+    uint32_t Nloop_rw = (N + 2) / 3;
+    Nloop_rw = (Nloop_rw + 1) & ~(uint32_t)1;
+#ifdef __AVX2__
+    yp2_smix1_salsa(B0, B1,
+                            (salsa20_blk_t *)ctx0->S0,
+                            (salsa20_blk_t *)ctx1->S0,
+                            XY0, XY1);
+#else
+    smix1_0_9(B0, 1, ctx0->Sbytes / 128, (salsa20_blk_t *)ctx0->S0, XY0, NULL);
+    smix1_0_9(B1, 1, ctx1->Sbytes / 128, (salsa20_blk_t *)ctx1->S0, XY1, NULL);
+#endif
+    yespower_smix1_1_0_2way(B0, B1, r, N, V0, V1, XY0, XY1, ctx0, ctx1);
+    yespower_smix2_1_0_2way(B0, B1, r, N, Nloop_rw, V0, V1, XY0, XY1, ctx0, ctx1);
+}
+
+static int yespower_2way_fixed_1_0_2048_8(yespower_local_t *local0,
+                                 yespower_local_t *local1,
+                                 const uint8_t *src0,
+                                 const uint8_t *src1,
+                                 yespower_binary_t *dst0,
+                                 yespower_binary_t *dst1)
+{
+    enum { yp2_N = 2048, yp2_r = 8 };
+    const size_t B_size = 128u * yp2_r;
+    const size_t V_size = B_size * yp2_N;
+    const size_t XY_size = B_size + 64u;
+    const size_t S_part = Swidth_to_Sbytes1(Swidth_0_9);
+    const size_t S_size = 3u * S_part;
+    const size_t need = B_size + V_size + XY_size + S_size;
+    yespower_local_t *locals[2] = {local0, local1};
+    const uint8_t *src[2] = {src0, src1};
+    yespower_binary_t *dst[2] = {dst0, dst1};
+    uint8_t *B[2], *S[2];
+    salsa20_blk_t *V[2], *XY[2];
+    pwxform_ctx_t ctx[2];
+    uint8_t sha256[2][32];
+
+    for (unsigned lane = 0; lane < 2; ++lane)
+    {
+        if (locals[lane]->aligned_size < need)
+        {
+            if (free_region(locals[lane]) || !alloc_region(locals[lane], need))
+                goto fail2;
+        }
+        B[lane] = (uint8_t *)locals[lane]->aligned;
+        V[lane] = (salsa20_blk_t *)(B[lane] + B_size);
+        XY[lane] = (salsa20_blk_t *)((uint8_t *)V[lane] + V_size);
+        S[lane] = (uint8_t *)XY[lane] + XY_size;
+        ctx[lane].S0 = S[lane];
+        ctx[lane].S1 = S[lane] + S_part;
+        ctx[lane].S2 = S[lane] + 2 * S_part;
+        ctx[lane].Sbytes = S_size;
+        ctx[lane].w = 0;
+        SHA256_Buf(src[lane], 32, sha256[lane]);
+        PBKDF2_SHA256_P(sha256[lane], 32, src[lane], 0, 1, B[lane], 128);
+        memcpy(sha256[lane], B[lane], 32);
+    }
+
+    yespower_smix_1_0_2way(B[0], B[1], yp2_N, yp2_r,
+                         V[0], V[1], XY[0], XY[1], &ctx[0], &ctx[1]);
+    for (unsigned lane = 0; lane < 2; ++lane)
+        HMAC_SHA256_Buf(B[lane] + B_size - 64, 64,
+                           sha256[lane], sizeof(sha256[lane]),
+                           (uint8_t *)dst[lane]);
+    return 0;
+
+fail2:
+    memset(dst0, 0xff, sizeof(*dst0));
+    memset(dst1, 0xff, sizeof(*dst1));
+    return -1;
+}
+#endif /* __AVX2__ */
+
+int yespower_2way_tls(const uint8_t *src0, const uint8_t *src1,
+    size_t srclen, const yespower_params_t *params,
+    yespower_binary_t *dst0, yespower_binary_t *dst1)
+{
+	static __thread int initialized;
+	static __thread yespower_local_t local[2];
+
+	if (!initialized) {
+		if (yespower_init_local(&local[0]) ||
+		    yespower_init_local(&local[1])) {
+			memset(dst0, 0xff, sizeof(*dst0));
+			memset(dst1, 0xff, sizeof(*dst1));
+			return -1;
+		}
+		initialized = 1;
+	}
+
+#if defined(__AVX2__)
+	if (srclen == 32 && params->version == YESPOWER_1_0 &&
+	    params->N == 2048 && params->r == 8 &&
+	    params->pers == NULL && params->perslen == 0)
+		return yespower_2way_fixed_1_0_2048_8(&local[0], &local[1],
+		    src0, src1, dst0, dst1);
+#endif
+
+	int rc0 = yespower(&local[0], src0, srclen, params, dst0);
+	int rc1 = yespower(&local[1], src1, srclen, params, dst1);
+	return rc0 | rc1;
+}
+
 
 /**
  * yespower(local, src, srclen, params, dst):
