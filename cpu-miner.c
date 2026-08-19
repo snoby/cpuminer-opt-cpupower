@@ -2891,11 +2891,15 @@ static void *stratum_thread(void *userdata )
                  if ( !opt_quiet )
                  {
                     if (net_diff > 0.)
-	               applog(LOG_BLUE, "%s block %d, network diff %.3f",
-                           algo_names[opt_algo], stratum.bloc_height, net_diff);
+                    {
+                    double pct = net_diff > 0. ? 100. * g_work.targetdiff / net_diff : 0.;
+                    applog(LOG_BLUE, "%s block %d, Diff: Net %g, Stratum %g, Target %g (%.4g%% of net)",
+                    algo_names[opt_algo], stratum.bloc_height,
+                    net_diff, stratum_diff, g_work.targetdiff, pct);
+                    }
                     else
-	               applog(LOG_BLUE, "%s %s block %d", short_url,
-                           algo_names[opt_algo], stratum.bloc_height);
+                    applog(LOG_BLUE, "%s %s block %d", short_url,
+                    algo_names[opt_algo], stratum.bloc_height);
 	         }
               }
               restart_threads();
