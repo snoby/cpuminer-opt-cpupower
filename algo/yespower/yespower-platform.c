@@ -42,43 +42,57 @@ static void *alloc_region(yespower_region_t *region, size_t size)
 #endif
 	    MAP_ANON | MAP_PRIVATE;
 #if defined(MAP_HUGETLB) && defined(HUGEPAGE_SIZE)
-	size_t new_size = size;
-	const size_t hugepage_mask = (size_t)HUGEPAGE_SIZE - 1;
-	if (size >= HUGEPAGE_THRESHOLD && size + hugepage_mask >= size) {
-		flags |= MAP_HUGETLB;
-#ifdef MAP_HUGE_2MB
-		/* Explicitly request 2MB hugepages.  On systems with multiple hugepage
-		 * sizes (2MB + 1GB), plain MAP_HUGETLB may default to the 1GB pool
-		 * which may have 0 free -> errno=12.  MAP_HUGE_2MB (0x40000) pins
-		 * the 2MB pool. */
-		flags |= MAP_HUGE_2MB;
-#endif
-/*
- * Linux's munmap() fails on MAP_HUGETLB mappings if size is not a multiple of
- * huge page size, so let's round up to huge page size here.
- */
-		new_size = size + hugepage_mask;
-		new_size &= ~hugepage_mask;
-	}
-	base = mmap(NULL, new_size, PROT_READ | PROT_WRITE, flags, -1, 0);
+	/*
+	 * PREFER Transparent Huge Pages (MAP_ANON + MADV_HUGEPAGE) over the
+	 * explicit MAP_HUGETLB pool.  THP respects first-touch NUMA: each thread's
+	 * scratchpad pages are placed on the DRAM node of the core that touches them
+	 * first, keeping each thread's 2MB scratchpad in its own CCX/L3 and avoiding
+	 * cross-CCD Infinity-Fabric traffic.  MAP_HUGETLB draws from the central
+	 * hugepage pool, which is NOT NUMA/CCX-aware and can place pages on the other
+	 * CCD -> cross-fabric access.  (AMD uProf measured 24.9% remote L3 misses
+	 * on CCX0 / 12.5% on CCX1 with MAP_HUGETLB.)
+	 */
+	base = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
 	if (base != MAP_FAILED) {
-		base_size = new_size;
-		if (flags & MAP_HUGETLB)
-			applog(LOG_INFO, "yespower: MAP_HUGETLB OK — %zu MB with 2MB pages",
-			       new_size / (1024*1024));
-	} else if (flags & MAP_HUGETLB) {
-		applog(LOG_WARNING, "yespower: MAP_HUGETLB FAILED (errno=%d: %s) — falling back to THP-backed normal memory",
-		       errno, strerror(errno));
-		flags &= ~MAP_HUGETLB;
-		base = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
-		if (base != MAP_FAILED) {
 #ifdef MADV_HUGEPAGE
-			/* Back with Transparent Huge Pages (THP) from normal memory:
-			 * no finite pool, never errno=12, no root required.  The kernel
-			 * promotes 2MB-aligned regions to THP automatically. */
-			madvise(base, size, MADV_HUGEPAGE);
+		madvise(base, size, MADV_HUGEPAGE);
 #endif
+		base_size = size;
+		applog(LOG_INFO,
+		    "yespower: THP-backed scratch (%zu MB, NUMA-local first-touch)",
+		    size / (1024 * 1024));
+	} else {
+		/* Fallback: explicit MAP_HUGETLB from the central pool (no locality). */
+		size_t new_size = size;
+		const size_t hugepage_mask = (size_t)HUGEPAGE_SIZE - 1;
+		if (size >= HUGEPAGE_THRESHOLD && size + hugepage_mask >= size) {
+			int hp_flags = flags | MAP_HUGETLB;
+#ifdef MAP_HUGE_2MB
+			/* Explicitly request 2MB hugepages.  On systems with multiple
+			 * hugepage sizes (2MB + 1GB), plain MAP_HUGETLB may default to
+			 * the 1GB pool which may have 0 free -> errno=12.  MAP_HUGE_2MB
+			 * (0x40000) pins the 2MB pool. */
+			hp_flags |= MAP_HUGE_2MB;
+#endif
+			/*
+			 * Linux's munmap() fails on MAP_HUGETLB mappings if size is not a
+			 * multiple of huge page size, so round up to huge page size here.
+			 */
+			new_size = size + hugepage_mask;
+			new_size &= ~hugepage_mask;
+			base = mmap(NULL, new_size, PROT_READ | PROT_WRITE, hp_flags, -1, 0);
+			if (base != MAP_FAILED) {
+				base_size = new_size;
+				applog(LOG_INFO,
+				    "yespower: MAP_HUGETLB OK — %zu MB with 2MB pages",
+				    new_size / (1024 * 1024));
+			}
 		}
+	}
+	if (base == MAP_FAILED) {
+		applog(LOG_WARNING, "yespower: hugepage alloc FAILED (errno=%d: %s)",
+		       errno, strerror(errno));
+		base = NULL;
 	}
 
 #else
