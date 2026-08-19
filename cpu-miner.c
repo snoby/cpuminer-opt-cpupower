@@ -281,15 +281,19 @@ static void report_summary_log( bool force )
 		if ( et10.tv_sec >= 10 ) {
 			memcpy( &ten_sec_start, &now, sizeof ten_sec_start );
 			double hrate = 0.;
+			uint32_t acc = 0, rej = 0;
 			pthread_mutex_lock( &stats_lock );
 			for ( int i = 0; i < opt_n_threads; i++ )
 				hrate += thr_hashrates[i];
+			acc = accepted_count;
+			rej = rejected_count;
 			pthread_mutex_unlock( &stats_lock );
 			char hr[16];
 			char hr_units[2] = {0,0};
 			scale_hash_for_display( &hrate, hr_units );
 			sprintf( hr, "%.2f", hrate );
-			applog( LOG_NOTICE, "Overall hashrate: %s %sH/s", hr, hr_units );
+			applog( LOG_NOTICE, "Overall hashrate: %s %sH/s, accepted %u, rejected %u",
+			        hr, hr_units, acc, rej );
 		}
 	}
 
