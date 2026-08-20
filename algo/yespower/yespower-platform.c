@@ -58,9 +58,13 @@ static void *alloc_region(yespower_region_t *region, size_t size)
 		madvise(base, size, MADV_HUGEPAGE);
 #endif
 		base_size = size;
-		applog(LOG_INFO,
-		    "yespower: THP-backed scratch (%zu MB, NUMA-local first-touch)",
-		    size / (1024 * 1024));
+		static int logged = 0;
+		if (!logged) {
+			logged = 1;
+			applog(LOG_INFO,
+			    "yespower: THP-backed scratch (%zu MB, NUMA-local first-touch)",
+			    size / (1024 * 1024));
+		}
 	} else {
 		/* Fallback: explicit MAP_HUGETLB from the central pool (no locality). */
 		size_t new_size = size;
