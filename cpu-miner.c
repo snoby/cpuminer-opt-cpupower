@@ -1333,7 +1333,11 @@ static int share_result( int result, struct work *work, const char *reason )
    // Routine accepts are silenced (overall hashrate comes from the 10s report).
    if ( !result || solved )
    {
-      const char *mark = solved ? CL_GRN " *** Potential Block Solving Share ***" CL_N : "";
+      char mark[96] = {0};
+      if (solved)
+         snprintf(mark, sizeof mark,
+                 CL_GRN " *** Potential Block Solving Share (diff %.6g, net diff %.6g) ***" CL_N,
+                 work ? work->sharediff : stratum.sharediff, net_diff);
 #if ((defined(_WIN64) || defined(__WINDOWS__)))
    applog( LOG_NOTICE, "%s %lu/%lu (%s%%), %s %sH, %s %sH/s%s",
                        sres, ( result ? accepted_count : rejected_count ),
