@@ -218,25 +218,29 @@ static inline void sprintf_et(char *str, long unsigned int seconds)
 		sprintf(str, "%lus", seconds);
 }
 
-// 10-second overall hashrate report (rolling average over the window).
+// 10-second overall hashrate report (aggregate of per-thread scan rates).
 // Returns true if it printed (caller should skip the detailed report this tick).
 static bool ten_sec_report(void)
 {
 	static struct timeval ten_sec_start = {0};
-	static uint64_t last_total_hashes = 0;
 	struct timeval now, et10;
 	gettimeofday( &now, NULL );
 	timeval_subtract( &et10, &now, &ten_sec_start );
 	if ( et10.tv_sec < 10 )
 		return false;
 	pthread_mutex_lock( &stats_lock );
-	uint64_t cur = total_hashes;
+	// Warm-up: skip until at least one scan has completed, so the first
+	// report doesn't show 0 (scans take ~60s in stratum).
+	if ( total_hashes == 0 ) {
+		pthread_mutex_unlock( &stats_lock );
+		return false;
+	}
+	double hrate = 0.;
+	for ( int i = 0; i < opt_n_threads; i++ )
+		hrate += thr_hashrates[i];
 	uint32_t acc = accepted_count;
 	uint32_t rej = rejected_count;
 	pthread_mutex_unlock( &stats_lock );
-	double hrate = (double)(cur - last_total_hashes)
-	             / (double)et10.tv_sec;
-	last_total_hashes = cur;
 	memcpy( &ten_sec_start, &now, sizeof ten_sec_start );
 	char hr[16];
 	char hr_units[2] = {0,0};
