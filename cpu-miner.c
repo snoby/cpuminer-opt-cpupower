@@ -218,11 +218,44 @@ static inline void sprintf_et(char *str, long unsigned int seconds)
 		sprintf(str, "%lus", seconds);
 }
 
+// 10-second overall hashrate report (rolling average over the window).
+// Returns true if it printed (caller should skip the detailed report this tick).
+static bool ten_sec_report(void)
+{
+	static struct timeval ten_sec_start = {0};
+	static uint64_t last_total_hashes = 0;
+	struct timeval now, et10;
+	gettimeofday( &now, NULL );
+	timeval_subtract( &et10, &now, &ten_sec_start );
+	if ( et10.tv_sec < 10 )
+		return false;
+	pthread_mutex_lock( &stats_lock );
+	uint64_t cur = total_hashes;
+	uint32_t acc = accepted_count;
+	uint32_t rej = rejected_count;
+	pthread_mutex_unlock( &stats_lock );
+	double hrate = (double)(cur - last_total_hashes)
+	             / (double)et10.tv_sec;
+	last_total_hashes = cur;
+	memcpy( &ten_sec_start, &now, sizeof ten_sec_start );
+	char hr[16];
+	char hr_units[2] = {0,0};
+	scale_hash_for_display( &hrate, hr_units );
+	sprintf( hr, "%.2f", hrate );
+	applog( LOG_NOTICE, "Overall hashrate: %s %sH/s, accepted %u, rejected %u",
+	        hr, hr_units, acc, rej );
+	return true;
+}
+
 // Enhanced periodic reporting function
 static void report_summary_log( bool force )
 {
 	struct timeval now, et, uptime, start_time;
 	static struct timeval cpu_temp_time = {0};
+
+	// 10-second overall hashrate report (rolling average over the window)
+	if ( ten_sec_report() )
+		return;
 	
 #if !(defined(__WINDOWS__) || defined(_WIN64) || defined(_WIN32) || defined(__APPLE__))
 	int curr_temp = cpu_temp(0);
@@ -274,29 +307,8 @@ static void report_summary_log( bool force )
 #endif
 
 	// 10-second overall hashrate report (rolling average over the window)
-	{
-		static struct timeval ten_sec_start = {0};
-		static uint64_t last_total_hashes = 0;
-		struct timeval et10;
-		timeval_subtract( &et10, &now, &ten_sec_start );
-		if ( et10.tv_sec >= 10 ) {
-			pthread_mutex_lock( &stats_lock );
-			uint64_t cur = total_hashes;
-			uint32_t acc = accepted_count;
-			uint32_t rej = rejected_count;
-			pthread_mutex_unlock( &stats_lock );
-			double hrate = (double)(cur - last_total_hashes)
-			             / (double)et10.tv_sec;
-			last_total_hashes = cur;
-			memcpy( &ten_sec_start, &now, sizeof ten_sec_start );
-			char hr[16];
-			char hr_units[2] = {0,0};
-			scale_hash_for_display( &hrate, hr_units );
-			sprintf( hr, "%.2f", hrate );
-			applog( LOG_NOTICE, "Overall hashrate: %s %sH/s, accepted %u, rejected %u",
-			        hr, hr_units, acc, rej );
-		}
-	}
+	if ( ten_sec_report() )
+		return;
 
 	// Check if we should report
 	if ( !( force && ( submit_sum || ( et.tv_sec > 5 ) ) ) ) {
