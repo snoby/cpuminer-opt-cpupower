@@ -2506,6 +2506,19 @@ out:
 	return NULL;
 }
 
+/* Dedicated status reporter: wakes every 10s so the Overall hashrate /
+ * accepted / rejected report fires on a fixed cadence regardless of how long
+ * each scanhash call blocks (LP_SCANTIME=60 in stratum). */
+static void *reporter_thread( void *userdata )
+{
+	(void)userdata;
+	while (1) {
+		sleep(10);
+		report_summary_log( true );
+	}
+	return NULL;
+}
+
 void restart_threads(void)
 {
 	for ( int i = 0; i < opt_n_threads; i++)
@@ -3926,6 +3939,13 @@ int main(int argc, char *argv[])
 			applog(LOG_ERR, "thread %d create failed", i);
 			return 1;
 		}
+	}
+
+	/* dedicated status reporter thread (10s hashrate cadence) */
+	{
+		pthread_t rpt;
+		if (pthread_create(&rpt, NULL, reporter_thread, NULL) != 0)
+			applog(LOG_ERR, "reporter thread create failed");
 	}
 
 	applog(LOG_INFO, "%d miner threads started, "
