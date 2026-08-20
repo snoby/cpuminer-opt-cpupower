@@ -16,6 +16,8 @@ extern "C" {
  * Writes 32 bytes to output. Returns 0 on success, -1 on error.
  */
 int civiclight_hash_v2(const void *input, size_t len, void *output);
+int civiclight_hash_v2_2way(const void *input0, const void *input1,
+    size_t len, void *output0, void *output1);
 
 /*
  * civiclight_powhash80(header80, output):
@@ -24,6 +26,8 @@ int civiclight_hash_v2(const void *input, size_t len, void *output);
  * Returns 0 on success, -1 on error.
  */
 int civiclight_powhash80(const void *header80, void *output);
+int civiclight_powhash80_2way(const void *header0, const void *header1,
+    void *output0, void *output1);
 
 /*
  * gate-compatible one-shot hash (algo_gate_t.hash signature).

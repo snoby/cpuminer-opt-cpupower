@@ -59,6 +59,31 @@ int civiclight_hash_v2(const void *input, size_t len, void *output)
 	return 0;
 }
 
+int civiclight_hash_v2_2way(const void *input0, const void *input1,
+    size_t len, void *output0, void *output1)
+{
+	uint8_t hash1[2][32];
+	uint8_t xor_buf[2][32];
+	yespower_binary_t yp_out[2];
+
+	SHA256_Buf(input0, len, hash1[0]);
+	SHA256_Buf(input1, len, hash1[1]);
+	if (yespower_2way_tls(hash1[0], hash1[1], 32,
+	    &civiclight_yp_params, &yp_out[0], &yp_out[1]) != 0) {
+		memset(output0, 0xff, 32);
+		memset(output1, 0xff, 32);
+		return -1;
+	}
+
+	for (int i = 0; i < 32; i++) {
+		xor_buf[0][i] = yp_out[0].uc[i] ^ hash1[0][i];
+		xor_buf[1][i] = yp_out[1].uc[i] ^ hash1[1][i];
+	}
+	SHA256_Buf(xor_buf[0], 32, output0);
+	SHA256_Buf(xor_buf[1], 32, output1);
+	return 0;
+}
+
 int civiclight_powhash80(const void *header80, void *output)
 {
 	/* CivicNet civiclight (verified against official CivicNet reference):
@@ -71,6 +96,55 @@ int civiclight_powhash80(const void *header80, void *output)
 	uint8_t raw_hash[32];
 	sha256d(raw_hash, (const unsigned char *)header80, 80);
 	return civiclight_hash_v2(raw_hash, 32, output);
+}
+
+static void civiclight_sha256d_80_midstate(uint8_t output[32],
+    const void *header80, const SHA256_CTX *midstate)
+{
+	SHA256_CTX ctx = *midstate;
+	uint8_t first[32];
+
+	SHA256_Update(&ctx, (const uint8_t *)header80 + 64, 16);
+	SHA256_Final(first, &ctx);
+	SHA256_Buf(first, sizeof(first), output);
+}
+
+static int civiclight_powhash80_from_midstate(const void *header80,
+    const SHA256_CTX *midstate, void *output)
+{
+	uint8_t raw_hash[32];
+
+	civiclight_sha256d_80_midstate(raw_hash, header80, midstate);
+	return civiclight_hash_v2(raw_hash, sizeof(raw_hash), output);
+}
+
+static int civiclight_powhash80_2way_midstate(const void *header0,
+    const void *header1, const SHA256_CTX *midstate,
+    void *output0, void *output1)
+{
+	uint8_t raw_hash[2][32];
+
+	civiclight_sha256d_80_midstate(raw_hash[0], header0, midstate);
+	civiclight_sha256d_80_midstate(raw_hash[1], header1, midstate);
+	return civiclight_hash_v2_2way(raw_hash[0], raw_hash[1],
+	    sizeof(raw_hash[0]), output0, output1);
+}
+
+int civiclight_powhash80_2way(const void *header0, const void *header1,
+    void *output0, void *output1)
+{
+	SHA256_CTX midstate;
+
+	if (memcmp(header0, header1, 64) != 0) {
+		int rc0 = civiclight_powhash80(header0, output0);
+		int rc1 = civiclight_powhash80(header1, output1);
+		return rc0 | rc1;
+	}
+
+	SHA256_Init(&midstate);
+	SHA256_Update(&midstate, header0, 64);
+	return civiclight_powhash80_2way_midstate(header0, header1, &midstate,
+	    output0, output1);
 }
 
 void civiclight_gate_hash(void *output, const void *input, uint32_t len)
@@ -118,15 +192,97 @@ void civiclight_set_target(struct work *work, double diff)
 	t[5] = 0;
 	t[6] = 0;
 	t[7] = (uint32_t)one_over;
-	/* DEBUG: dump the target the miner computes for this diff */
-	fprintf(stderr, "CIVDIFF set_target diff=%.17g eff=%.17g t[7]=0x%08x t[6]=0x%08x\n",
-	        diff, effective_diff, t[7], t[6]);
 	work->targetdiff = effective_diff;
 }
 
 int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
                       uint64_t *hashes_done)
 {
+#if defined(__AVX2__)
+	uint32_t hash_pair[2][8] __attribute__((aligned(64)));
+	uint32_t header_pair[2][20] __attribute__((aligned(64)));
+	uint32_t tail_hash[8] __attribute__((aligned(64)));
+	SHA256_CTX header_midstate;
+	uint32_t *pdata = work->data;
+	const uint32_t *ptarget = work->target;
+	const uint32_t Htarg = ptarget[7];
+	uint32_t n = pdata[19];
+	const uint32_t first_nonce = n;
+	int num_found = 0;
+
+	/* Pool-proven convention: hash be32enc(n), submit numeric n unchanged. */
+	for (int k = 0; k < 19; k++)
+		be32enc(&header_pair[0][k], pdata[k]);
+	header_pair[0][19] = 0;
+	memcpy(header_pair[1], header_pair[0], sizeof(header_pair[0]));
+	SHA256_Init(&header_midstate);
+	SHA256_Update(&header_midstate, header_pair[0], 64);
+
+	while (n < max_nonce && max_nonce - n >= 2 &&
+	    !work_restart[thr_id].restart) {
+		be32enc(&header_pair[0][19], n);
+		be32enc(&header_pair[1][19], n + 1);
+		if (civiclight_powhash80_2way_midstate(header_pair[0],
+		    header_pair[1], &header_midstate,
+		    hash_pair[0], hash_pair[1]) != 0)
+			break;
+
+		for (unsigned lane = 0; lane < 2; lane++) {
+			uint32_t candidate = n + lane;
+			if (hash_pair[lane][7] < Htarg &&
+			    fulltest(hash_pair[lane], ptarget)) {
+				work->nonces[num_found++] = candidate;
+				work_set_target_ratio(work, hash_pair[lane]);
+#ifdef CIVICLIGHT_SHARE_DEBUG
+				fprintf(stderr, "CIVSHARE header80=");
+				for (int k = 0; k < 80; k++)
+					fprintf(stderr, "%02x",
+					    ((const uint8_t *)header_pair[lane])[k]);
+				fprintf(stderr, " vhash=");
+				for (int k = 0; k < 32; k++)
+					fprintf(stderr, "%02x",
+					    ((const uint8_t *)hash_pair[lane])[k]);
+				fprintf(stderr, " v7=0x%08x\\n",
+				    hash_pair[lane][7]);
+#endif
+			}
+		}
+		n += 2;
+		if (num_found)
+			break;
+	}
+
+	if (!num_found && n < max_nonce && max_nonce - n == 1 &&
+	    !work_restart[thr_id].restart) {
+		be32enc(&header_pair[0][19], n);
+		if (civiclight_powhash80_from_midstate(header_pair[0],
+		    &header_midstate, tail_hash) == 0) {
+			if (tail_hash[7] < Htarg && fulltest(tail_hash, ptarget)) {
+				work->nonces[num_found++] = n;
+				work_set_target_ratio(work, tail_hash);
+#ifdef CIVICLIGHT_SHARE_DEBUG
+				fprintf(stderr, "CIVSHARE header80=");
+				for (int k = 0; k < 80; k++)
+					fprintf(stderr, "%02x",
+					    ((const uint8_t *)header_pair[0])[k]);
+				fprintf(stderr, " vhash=");
+				for (int k = 0; k < 32; k++)
+					fprintf(stderr, "%02x",
+					    ((const uint8_t *)tail_hash)[k]);
+				fprintf(stderr, " v7=0x%08x\\n", tail_hash[7]);
+#endif
+			}
+			n++;
+		}
+	}
+
+	*hashes_done = n - first_nonce;
+	if (num_found == 1)
+		pdata[19] = work->nonces[0];
+	else if (num_found == 0)
+		pdata[19] = n;
+	return num_found;
+#else
 	uint32_t vhash[8] __attribute__((aligned(64)));
 	uint32_t endiandata[20] __attribute__((aligned(64)));
 	uint32_t *pdata = work->data;
@@ -148,6 +304,7 @@ int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
 			break;
 		if (vhash[7] < Htarg && fulltest(vhash, ptarget)) {
 			work_set_target_ratio(work, vhash);
+#ifdef CIVICLIGHT_SHARE_DEBUG
 			/* DEBUG: dump the EXACT 80-byte header buffer passed to
 			 * civiclight_powhash80 (endiandata[0..19] as bytes), + vhash.
 			 * Hash these exact bytes against the reference to test whether
@@ -164,6 +321,7 @@ int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
 			for (int k = 0; k < 32; k++)
 				fprintf(stderr, "%02x", ((unsigned char*)vhash)[k]);
 			fprintf(stderr, " v7=0x%08x\n", vhash[7]);
+#endif
 			*hashes_done = n - first_nonce + 1;
 			pdata[19] = n;
 			return true;
@@ -174,11 +332,15 @@ int scanhash_civiclight(int thr_id, struct work *work, uint32_t max_nonce,
 	*hashes_done = n - first_nonce + 1;
 	pdata[19] = n;
 	return 0;
+#endif
 }
 
 bool register_civiclight_algo(algo_gate_t *gate)
 {
 	gate->optimizations = SSE2_OPT | SHA_OPT;
+#if defined(__AVX2__)
+	gate->optimizations |= AVX2_OPT;
+#endif
 	gate->get_max64     = (void*)&civiclight_get_max64;
 	gate->scanhash      = (void*)&scanhash_civiclight;
 	gate->hash          = (void*)&civiclight_gate_hash;
