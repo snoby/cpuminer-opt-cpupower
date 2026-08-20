@@ -185,6 +185,7 @@ void get_defconfig_path(char *out, size_t bufsize, char *argv0)
 	}
 	if (stat(out, &info) != 0) {
 		out[0] = '\0';
+		free(cmd);
 		return;
 	}
 	out[bufsize - 1] = '\0';
@@ -1827,7 +1828,7 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 		goto out;
 	}
 
-        merkle = (uchar**) malloc(merkle_count * sizeof(char *));
+        merkle = (uchar**) malloc(merkle_count * sizeof(uchar *));
 	for (i = 0; i < merkle_count; i++) {
 		const char *s = json_string_value(json_array_get(merkle_arr, i));
 		if (!s || strlen(s) != 64) {

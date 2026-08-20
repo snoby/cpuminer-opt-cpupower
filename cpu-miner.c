@@ -1113,9 +1113,14 @@ static bool gbt_work_decode( const json_t *val, struct work *work )
    {
       tmp = json_array_get( txa, i );
       const char *tx_hex = json_string_value( json_object_get( tmp, "data" ) );
-      const int tx_size = tx_hex ? (int) ( strlen( tx_hex ) / 2 ) : 0;
+      if ( !tx_hex )
+      {
+         applog( LOG_ERR, "JSON invalid transactions" );
+         goto out;
+      }
+      const int tx_size = (int) ( strlen( tx_hex ) / 2 );
       unsigned char *tx = (uchar*) malloc( tx_size );
-      if ( !tx_hex || !hex2bin( tx, tx_hex, tx_size ) )
+      if ( !tx || !hex2bin( tx, tx_hex, tx_size ) )
       {
          applog( LOG_ERR, "JSON invalid transactions" );
          free( tx );
@@ -1564,7 +1569,7 @@ static bool submit_upstream_work( CURL *curl, struct work *work )
 
    if ( !have_stratum && allow_mininginfo )
    {
-      struct work wheight;
+      struct work wheight = {0};
       get_mininginfo( curl, &wheight );
       if ( work->height && work->height <= net_blocks )
       {
@@ -1645,7 +1650,7 @@ const char *gbt_lp_req =
 static bool get_upstream_work( CURL *curl, struct work *work )
 {
    json_t *val;
-   int err;
+   int err = 0;
    bool rc;
    struct timeval tv_start, tv_end, diff;
 
@@ -2612,7 +2617,8 @@ start:
 	   rc = work_decode(res, &g_work);
 	 if (rc)
          {
-           bool newblock = g_work.job_id && strcmp(start_job_id, g_work.job_id);
+           bool newblock = g_work.job_id && start_job_id &&
+                        strcmp(start_job_id, g_work.job_id);
 	   newblock |= (start_diff != net_diff); // the best is the height but... longpoll...
            if (newblock)
            {
@@ -2718,7 +2724,6 @@ static bool stratum_handle_response( char *buf )
            applog(LOG_INFO, "JSON decode failed(%d): %s", err.line, err.text);
 	   goto out;
 	}
-        json_object_get( val, "result" );
 	id_val = json_object_get( val, "id" );
 	if ( !id_val || json_is_null(id_val) )
 		goto out;
