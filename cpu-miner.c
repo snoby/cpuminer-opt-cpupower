@@ -273,21 +273,22 @@ static void report_summary_log( bool force )
 	}
 #endif
 
-	// 10-second overall hashrate report (aggregate across all threads)
+	// 10-second overall hashrate report (rolling average over the window)
 	{
 		static struct timeval ten_sec_start = {0};
+		static uint64_t last_total_hashes = 0;
 		struct timeval et10;
 		timeval_subtract( &et10, &now, &ten_sec_start );
 		if ( et10.tv_sec >= 10 ) {
-			memcpy( &ten_sec_start, &now, sizeof ten_sec_start );
-			double hrate = 0.;
-			uint32_t acc = 0, rej = 0;
 			pthread_mutex_lock( &stats_lock );
-			for ( int i = 0; i < opt_n_threads; i++ )
-				hrate += thr_hashrates[i];
-			acc = accepted_count;
-			rej = rejected_count;
+			uint64_t cur = total_hashes;
+			uint32_t acc = accepted_count;
+			uint32_t rej = rejected_count;
 			pthread_mutex_unlock( &stats_lock );
+			double hrate = (double)(cur - last_total_hashes)
+			             / (double)et10.tv_sec;
+			last_total_hashes = cur;
+			memcpy( &ten_sec_start, &now, sizeof ten_sec_start );
 			char hr[16];
 			char hr_units[2] = {0,0};
 			scale_hash_for_display( &hrate, hr_units );
