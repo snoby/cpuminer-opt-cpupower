@@ -22,6 +22,13 @@
 #     the trailing -version), or the miner dies with the "should be ..." error.
 #
 # Binary is -march=znver2 (AMD Rome/Zen2): runs on Rome/Milan/Genoa.
+#
+# PORTABILITY (GLIBCXX): -static-libstdc++ -static-libgcc link the C++ runtime
+# statically so the binary carries NO GLIBCXX_3.4.x version requirement.  Without
+# this, a build on a newer distro (e.g. clang/gcc-13 on Ubuntu 24.04) emits
+# GLIBCXX_3.4.32+ symbols that fail to load on older HiveOS boxes (Ubuntu 22.04
+# libstdc++ tops out at 3.4.30), crashing the miner at startup with
+# "version GLIBCXX_3.4.32 not found".  Static C++ runtime fixes it for ANY host.
 set -e
 
 # -march=znver2 targets AMD Rome (Zen2, e.g. EPYC 7742) and runs on any Zen2/+
@@ -45,7 +52,9 @@ echo "=== Compiler: $CC ($($CC --version | head -1)) ==="
 
 build() {
     export CFLAGS="$BASE_CFLAGS"
-    export LDFLAGS="-pthread"
+    # -static-libstdc++/-static-libgcc: embed the C++ runtime so the binary is
+    # independent of the target host's libstdc++ version (see portability note above).
+    export LDFLAGS="-pthread -static-libstdc++ -static-libgcc"
     ./configure --with-curl
     make clean
     make -j"$(nproc)"
