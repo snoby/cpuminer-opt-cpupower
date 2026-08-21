@@ -20,7 +20,8 @@
 # Options:
 #   -a ALGO       Algorithm (default: yespower)
 #                 Choices: yespower, yespowerr16, cpupower, yespowerurx,
-#                          yespowerlitb, yespowerinter, yespowersugar
+#                          yespowerlitb, yespowerinter, yespowersugar,
+#                          civiclight (2-way, uses ~4 MB working set)
 #   -o URL        Stratum URL  (e.g. stratum+tcp://pool.example.com:3333)
 #   -u USER       Pool username / wallet address
 #   -p PASS       Pool password (default: x)
@@ -43,10 +44,18 @@ BINARY="$(dirname "$0")/cpuminer"
 THREAD_OVERRIDE=""
 DRY_RUN=0
 
-# V array size in KB per thread — all current yespower variants:
-#   N=2048 r=32  → 128*32*2048 = 8 MB   (yespower, cpupower, urx, litb, inter, sugar)
-#   N=4096 r=16  → 128*16*4096 = 8 MB   (yespowerr16)
-V_SIZE_KB=8192
+# Working set per thread by algorithm (KB).  Used for two things:
+#   - select_cache_fit_cores:  cores-per-CCX quota = L3_KB / V_SIZE_KB
+#   - ensure_hugepages:         hugepages = threads * ceil(V_SIZE_KB/2048) + margin
+#
+# All single-lane yespower variants: N=2048 r=32 / N=4096 r=16 -> 8 MB.
+# civiclight 2-way: two scratchpad regions, each 2.097 MB -> 4.19 MB.
+case "${ALGO}" in
+    civiclight) V_SIZE_KB=4096 ;;   # 2-way: 2 x 2.097 MB regions
+    *)         V_SIZE_KB=8192 ;;      # yespower family: 8 MB
+esac
+# Huge pages (2MB) per thread, rounded up from V_SIZE_KB.
+HP_PER_THREAD=$(( (V_SIZE_KB + 2047) / 2048 ))
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -215,11 +224,11 @@ select_cache_fit_cores() {
 }
 
 # Make sure enough 2MB huge pages exist for the planned thread count.
-# Each yespower thread needs ~8.2MB -> 5 huge pages after rounding.
+# Each thread needs HP_PER_THREAD 2MB pages (8 MB -> 4, civiclight 2-way -> 2).
 # Measured +20% on EPYC 7642 (5840 -> 7016 H/s at 48t).
 ensure_hugepages() {
     local total_threads="$1"
-    local need=$(( total_threads * 5 + 10 ))
+    local need=$(( total_threads * HP_PER_THREAD + 10 ))
     local have
     have=$(awk '/HugePages_Total/{print $2}' /proc/meminfo)
     if [[ "$have" -ge "$need" ]]; then

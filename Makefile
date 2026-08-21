@@ -654,17 +654,17 @@ AUTOCONF = ${SHELL} '/home/snoby/miner/cpuminer-opt-cpupower/missing' autoconf
 AUTOHEADER = ${SHELL} '/home/snoby/miner/cpuminer-opt-cpupower/missing' autoheader
 AUTOMAKE = ${SHELL} '/home/snoby/miner/cpuminer-opt-cpupower/missing' automake-1.16
 AWK = gawk
-CC = gcc-13
-CCAS = gcc-13
+CC = clang
+CCAS = clang
 CCASDEPMODE = depmode=gcc3
-CCASFLAGS = -O2 -march=native -maes -pthread
+CCASFLAGS = -O3 -march=znver2 -pthread -funroll-loops -fomit-frame-pointer -falign-functions=32 -falign-loops=32 -fvectorize -fslp-vectorize
 CCDEPMODE = depmode=gcc3
-CFLAGS = -O2 -march=native -maes -pthread  -Iyes/include
-CPP = gcc-13 -E
+CFLAGS = -O3 -march=znver2 -pthread -funroll-loops -fomit-frame-pointer -falign-functions=32 -falign-loops=32 -fvectorize -fslp-vectorize  -Iyes/include
+CPP = clang -E
 CPPFLAGS =   -Iyes/include
 CSCOPE = cscope
 CTAGS = ctags
-CXX = g++
+CXX = clang++
 CXXDEPMODE = depmode=gcc3
 CXXFLAGS = -g -O2
 CYGPATH_W = echo
@@ -683,7 +683,7 @@ INSTALL_PROGRAM = ${INSTALL}
 INSTALL_SCRIPT = ${INSTALL}
 INSTALL_STRIP_PROGRAM = $(install_sh) -c -s
 JANSSON_LIBS = -ljansson
-LDFLAGS =   -Lyes/lib 
+LDFLAGS =  -pthread -static-libstdc++ -static-libgcc -Lyes/lib 
 LIBCURL = -lcurl -lz
 LIBCURL_CFLAGS =  -Iyes/include
 LIBCURL_CPPFLAGS =  -Iyes/include
@@ -714,8 +714,8 @@ abs_builddir = /home/snoby/miner/cpuminer-opt-cpupower
 abs_srcdir = /home/snoby/miner/cpuminer-opt-cpupower
 abs_top_builddir = /home/snoby/miner/cpuminer-opt-cpupower
 abs_top_srcdir = /home/snoby/miner/cpuminer-opt-cpupower
-ac_ct_CC = gcc-13
-ac_ct_CXX = g++
+ac_ct_CC = clang
+ac_ct_CXX = 
 am__include = include
 am__leading_dot = .
 am__quote = 
@@ -845,7 +845,7 @@ cpuminer_SOURCES = cpu-miner.c util.c uint256.cpp api.c sysinfos.c \
 	$(am__append_1) $(am__append_2) $(am__append_3) \
 	$(am__append_4) $(am__append_6)
 disable_flags = $(am__append_5)
-cpuminer_LDFLAGS =   -Lyes/lib 
+cpuminer_LDFLAGS =  -pthread -static-libstdc++ -static-libgcc -Lyes/lib 
 cpuminer_LDADD = -lcurl -lz -ljansson -lpthread  -lssl -lcrypto -lgmp
 cpuminer_CPPFLAGS =  -Iyes/include $(ALL_INCLUDES)
 cpuminer_CFLAGS = -Wno-pointer-sign -Wno-pointer-to-int-cast \
