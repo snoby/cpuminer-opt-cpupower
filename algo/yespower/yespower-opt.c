@@ -885,7 +885,23 @@ yp2_pwx_1_0_pair(__m128i *Xa,
                    const uint8_t *S0b,
                    const uint8_t *S1b)
 {
-#ifdef __AVX2__
+#ifdef YP2_PWX_ILV
+    /* Soj-CivicLight ILV variant: hoist ALL 4 S-table loads (2 lanes x
+     * S0/S1) ahead of the ALU so the memory subsystem has all 4 gathers
+     * in flight before any multiply/add/xor.  Increases MLP vs the packed
+     * version which interleaves loads with compute.  Mirrors
+     * civic_pwxform_2way_ilv.  Bit-identical output. */
+    uint64_t xa = EXTRACT64(*Xa) & Smask2_0_9;
+    uint64_t xb = EXTRACT64(*Xb) & Smask2_0_9;
+    __m128i adda = *(__m128i *)(S0a + (uint32_t)xa);
+    __m128i addb = *(__m128i *)(S0b + (uint32_t)xb);
+    __m128i xora = *(__m128i *)(S1a + (uint32_t)(xa >> 32));
+    __m128i xorb = *(__m128i *)(S1b + (uint32_t)(xb >> 32));
+    __m128i Ya = _mm_mul_epu32(_mm_srli_si128(*Xa, 4), *Xa);
+    __m128i Yb = _mm_mul_epu32(_mm_srli_si128(*Xb, 4), *Xb);
+    *Xa = _mm_xor_si128(_mm_add_epi64(Ya, adda), xora);
+    *Xb = _mm_xor_si128(_mm_add_epi64(Yb, addb), xorb);
+#elif defined(__AVX2__)
     uint64_t xa = EXTRACT64(*Xa) & Smask2_0_9;
     uint64_t xb = EXTRACT64(*Xb) & Smask2_0_9;
     __m256i X = _mm256_set_m128i(*Xb, *Xa);
@@ -1232,6 +1248,53 @@ static void yp2_blockmix_xor_save(salsa20_blk_t *Bin1out0,
     yp2_ctx_load(&a, ctx0);
     yp2_ctx_load(&b, ctx1);
 
+#ifdef YP2_SMIX2_PIPE
+    /* Software-pipelined smix2: preload Vj[i+1] into registers (nv0/nv1)
+     * BEFORE processing iteration i, overlapping the V-block load latency
+     * with iteration i's pwxform compute chain.  The V[j] sub-blocks are at
+     * contiguous known addresses within a blockmix, so this is independent
+     * of the cross-call j->V[j]->j dependency.  Mirrors Soj-CivicLight's
+     * civic_blockmix_xor_save_2way_pipe.  Pure scheduling change: the
+     * compute is bit-identical. */
+    {
+        __m128i v0[4], v1[4], nv0[4], nv1[4];
+        for (unsigned q = 0; q < 4; ++q)
+        {
+            v0[q] = Bin20[0].q[q];
+            v1[q] = Bin21[0].q[q];
+        }
+#pragma GCC unroll 16
+        for (size_t i = 0; i <= last; ++i)
+        {
+            if (i != last)
+                for (unsigned q = 0; q < 4; ++q)
+                {
+                    nv0[q] = Bin20[i + 1].q[q];
+                    nv1[q] = Bin21[i + 1].q[q];
+                }
+            for (unsigned q = 0; q < 4; ++q)
+            {
+                __m128i ya = _mm_xor_si128(v0[q], Bin1out0[i].q[q]);
+                __m128i yb = _mm_xor_si128(v1[q], Bin1out1[i].q[q]);
+                Bin20[i].q[q] = ya;
+                Bin21[i].q[q] = yb;
+                a.x[q] = _mm_xor_si128(a.x[q], ya);
+                b.x[q] = _mm_xor_si128(b.x[q], yb);
+            }
+            yp2_pwxform(&a, &b);
+            if (i != last)
+            {
+                yp2_state_write(&Bin1out0[i], &a);
+                yp2_state_write(&Bin1out1[i], &b);
+            }
+            for (unsigned q = 0; q < 4; ++q)
+            {
+                v0[q] = nv0[q];
+                v1[q] = nv1[q];
+            }
+        }
+    }
+#else
     for (size_t i = 0; i <= last; ++i)
     {
         for (unsigned q = 0; q < 4; ++q)
@@ -1250,6 +1313,7 @@ static void yp2_blockmix_xor_save(salsa20_blk_t *Bin1out0,
             yp2_state_write(&Bin1out1[i], &b);
         }
     }
+#endif
     yp2_ctx_store(ctx0, &a);
     yp2_ctx_store(ctx1, &b);
     yp2_finish_salsa(&a, &Bin1out0[last]);

@@ -848,7 +848,7 @@ disable_flags = $(am__append_5)
 cpuminer_LDFLAGS =  -pthread -static-libstdc++ -static-libgcc -Lyes/lib 
 cpuminer_LDADD = -lcurl -lz -ljansson -lpthread  -lssl -lcrypto -lgmp
 cpuminer_CPPFLAGS =  -Iyes/include $(ALL_INCLUDES)
-cpuminer_CFLAGS = -Wno-pointer-sign -Wno-pointer-to-int-cast \
+cpuminer_CFLAGS = -Wno-pointer-sign -Wno-pointer-to-int-cast -DYP2_PWX_ILV \
 	$(disable_flags) $(am__append_7)
 
 # NeuroMorph's consensus digest requires exact IEEE-754 semantics (isnan/isinf
