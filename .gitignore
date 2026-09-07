@@ -26,9 +26,7 @@ config.sub
 
 mingw32-config.cache
 
-*/.dirstamp
-*/*/.dirstamp
-*/*/*/.dirstamp
+*.dirstamp
 *.iml
 
 *.vcxproj.user
@@ -59,3 +57,29 @@ perf.data*
 *.db-shm
 *.db-wal
 *.db-journal
+
+# Editor / tooling index caches
+.cache/
+.ccls-cache/
+compile_commands.json
+
+# Configure / build artifacts
+configure~
+*.tar.gz
+pgo-profile/
+profile-data.txt
+cachegrind.out.*
+
+# Experiment leftovers / dead sources (not wired into Makefile.am build)
+algo/backup
+*.bak
+algo/sha/sha256-hash.c
+algo/sha/sha256-hash.h
+algo/sha/hmac-sha256-hash.c
+algo/sha/hmac-sha256-hash.h
+algo/yespower/yespower-sha256-shim.c
+simd-utils.h
+simd-utils/
+
+# Scratch logs
+logs_llm/
